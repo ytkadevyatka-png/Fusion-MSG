@@ -3,6 +3,7 @@ import { signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPas
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, getDoc, query, collection, where, deleteDoc, arrayRemove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { showToast, openModal, closeModal } from "./toast.js";
 
+// DOM Elements
 const authModal = document.getElementById('authModal');
 const loginForm = document.getElementById('loginForm');
 const registerChoice = document.getElementById('registerChoice');
@@ -21,14 +22,14 @@ const settingsProfileInfo = document.getElementById('settingsProfileInfo');
 const statusSelect = document.getElementById('statusSelect');
 const customStatusInput = document.getElementById('customStatusInput');
 const bgAnimSelect = document.getElementById('bgAnimSelect');
+const appLoader = document.getElementById('appLoader');
 
-// Профиль и Setup
+// Setup & Edit Profile Elements
 const setupAvatarUrl = document.getElementById('setupAvatarUrl');
 const setupAvatarPreview = document.getElementById('setupAvatarPreview');
 const setupDisplayName = document.getElementById('setupDisplayName');
 const setupUsername = document.getElementById('setupUsername');
 const finishSetupBtn = document.getElementById('finishSetupBtn');
-
 const openEditProfileBtn = document.getElementById('openEditProfileBtn');
 const editProfileModal = document.getElementById('editProfileModal');
 const closeEditProfile = document.getElementById('closeEditProfile');
@@ -38,6 +39,7 @@ const editDisplayName = document.getElementById('editDisplayName');
 const editUsername = document.getElementById('editUsername');
 const saveProfileChangesBtn = document.getElementById('saveProfileChangesBtn');
 
+// Auth Elements
 const regUsername = document.getElementById('regUsername');
 const regEmail = document.getElementById('regEmail');
 const regPassword = document.getElementById('regPassword');
@@ -50,6 +52,7 @@ let currentUserUid = null;
 let currentSelectedTheme = 'default';
 let currentSelectedBg = 'bg-flow';
 
+// --- THEME & LOAD LOGIC ---
 const savedTheme = localStorage.getItem('fusion-theme') || 'default';
 applyTheme(savedTheme);
 const savedBgPattern = localStorage.getItem('fusion-bg-pattern') || 'bg-flow';
@@ -78,8 +81,13 @@ document.querySelectorAll('.theme-card').forEach(card => {
     card.addEventListener('click', () => { const theme = card.getAttribute('data-theme'); currentSelectedTheme = theme; applyTheme(theme); }); 
 });
 
-function resetVisualSettings() { applyTheme('default'); applyBgPattern('bg-flow'); if(bgAnimSelect) bgAnimSelect.value = 'bg-flow'; }
+function resetVisualSettings() { 
+    applyTheme('default'); 
+    applyBgPattern('bg-flow'); 
+    if(bgAnimSelect) bgAnimSelect.value = 'bg-flow'; 
+}
 
+// --- UI EVENT LISTENERS ---
 document.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('.modal-nav-item');
     if (!tabBtn) return;
@@ -115,6 +123,7 @@ function showAuthConfirm(msg) {
     });
 }
 
+// --- AUTH LOGIC ---
 function sendCodeSimulate(type, btnId, inputId, timerId) { 
     const btn = document.getElementById(btnId); const input = document.getElementById(inputId); const timerDisplay = document.getElementById(timerId); 
     const code = Math.floor(100000 + Math.random() * 900000).toString(); 
@@ -139,72 +148,25 @@ if(loginBtn) {
     }); 
 }
 
-// === ИСПРАВЛЕННАЯ РЕГИСТРАЦИЯ (СНАЧАЛА ВХОД, ПОТОМ ПРОВЕРКА БД) ===
 const regBtn = document.getElementById('regBtn');
 if(regBtn) { 
     regBtn.addEventListener('click', async () => { 
-        const username = regUsername.value.trim();
-        const email = regEmail.value.trim();
-        const pass = regPassword.value;
-        const confirm = regPasswordConfirm.value;
-        const code = regCodeInput.value;
-
-        if (!username) return showToast("Введите username", "error");
-        if (username.length < 3) return showToast("Username слишком короткий", "error");
-        if (!email) return showToast("Введите Email", "error");
-        if (!pass) return showToast("Введите пароль", "error");
+        const username = regUsername.value.trim(); const email = regEmail.value.trim(); const pass = regPassword.value; const confirm = regPasswordConfirm.value; const code = regCodeInput.value;
+        if (!username || username.length < 3) return showToast("Username слишком короткий", "error");
         if (pass !== confirm) return showToast("Пароли не совпадают", "error");
-        
-        // Проверка кода
-        if (code !== generatedRegCode) {
-            return showToast("Неверный код (нажмите 'Код')", "error");
-        }
+        if (code !== generatedRegCode) return showToast("Неверный код", "error");
 
         try {
-            // 1. Создаем пользователя в Auth (получаем права доступа)
-            let cred;
-            try {
-                cred = await createUserWithEmailAndPassword(auth, email, pass);
-            } catch(e) {
-                if (e.code === 'auth/email-already-in-use') throw new Error("Этот Email уже занят");
-                throw new Error(e.message);
-            }
-
-            // 2. Теперь, когда мы авторизованы, проверяем никнейм в БД
+            let cred; try { cred = await createUserWithEmailAndPassword(auth, email, pass); } catch(e) { throw new Error(e.message); }
             const q = query(collection(db, "users"), where("username", "==", username));
             const snapshot = await getDocs(q);
+            if (!snapshot.empty) { await cred.user.delete(); return showToast("Этот username уже занят", "error"); }
+            await updateProfile(cred.user, { displayName: username, photoURL: "https://cdn-icons-png.flaticon.com/512/847/847969.png" });
             
-            if (!snapshot.empty) {
-                // Если занято - удаляем аккаунт и сообщаем ошибку
-                await cred.user.delete();
-                return showToast("Этот username уже занят", "error");
-            }
-
-            // 3. Обновляем профиль Firebase Auth
-            await updateProfile(cred.user, { 
-                displayName: username, 
-                photoURL: "https://cdn-icons-png.flaticon.com/512/847/847969.png" 
-            });
-            
-            // 4. Сохраняем пользователя в Firestore
-            // Ставим isProfileSetup: false, чтобы запустить процесс настройки профиля
-            await saveUserToDb(cred.user, 'online', { 
-                username: username, 
-                theme: 'default', 
-                bgPattern: 'bg-flow', 
-                isProfileSetup: false 
-            });
-            
+            // Сразу ставим флаг isProfileSetup: false для новых
+            await saveUserToDb(cred.user, 'online', { username: username, theme: 'default', bgPattern: 'bg-flow', isProfileSetup: false });
             showToast("Регистрация успешна!", "success");
-
-        } catch (e) { 
-            console.error("Registration error:", e);
-            if (e.message.includes("Missing or insufficient permissions")) {
-                showToast("Ошибка доступа к базе. Проверьте правила Firestore.", "error");
-            } else {
-                showToast("Ошибка: " + e.message, "error"); 
-            }
-        } 
+        } catch (e) { showToast("Ошибка: " + e.message, "error"); } 
     }); 
 }
 
@@ -212,26 +174,34 @@ const handleGoogle = async () => { try { await signInWithPopup(auth, provider); 
 if(document.getElementById('googleLoginBtn')) document.getElementById('googleLoginBtn').addEventListener('click', handleGoogle);
 if(document.getElementById('googleRegBtn')) document.getElementById('googleRegBtn').addEventListener('click', handleGoogle);
 
+// === AUTH STATE LISTENER ===
 onAuthStateChanged(auth, async (user) => {
     if (user) { 
         currentUserUid = user.uid; 
         closeModal('authModal'); 
         if(settingsProfileInfo) { settingsProfileInfo.innerHTML = `<img src="${user.photoURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}"><h2>${user.displayName || 'User'}</h2><p>${user.email}</p>`; } 
+        
         await saveUserToDb(user, 'online');
         
-        // --- ПРОВЕРКА НАСТРОЙКИ ПРОФИЛЯ ---
+        // --- LOAD USER SETTINGS ---
         const userDoc = await getDoc(doc(db, "users", user.uid));
         if (userDoc.exists()) {
             const data = userDoc.data();
-            applyTheme(data.theme || 'default');
-            applyBgPattern(data.bgPattern || 'bg-flow');
-            currentSelectedTheme = data.theme || 'default';
-            currentSelectedBg = data.bgPattern || 'bg-flow';
-            if(bgAnimSelect) bgAnimSelect.value = data.bgPattern || 'bg-flow';
+            
+            // Apply saved theme
+            const loadedTheme = data.theme || 'default';
+            const loadedBg = data.bgPattern || 'bg-flow';
+            applyTheme(loadedTheme);
+            applyBgPattern(loadedBg);
+            
+            // Update UI controls
+            currentSelectedTheme = loadedTheme;
+            currentSelectedBg = loadedBg;
+            if(bgAnimSelect) bgAnimSelect.value = loadedBg;
             if(statusSelect && data.status) statusSelect.value = data.status;
             if(customStatusInput && data.customStatusText) customStatusInput.value = data.customStatusText;
 
-            // Если профиль не настроен - открываем модалку setup
+            // Setup Profile Check
             if (!data.isProfileSetup) {
                 openModal('initialSetupModal');
                 setupUsername.value = data.username || '';
@@ -240,27 +210,55 @@ onAuthStateChanged(auth, async (user) => {
                 setupAvatarPreview.src = user.photoURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
             }
         }
-    } 
-    else { currentUserUid = null; resetVisualSettings(); openModal('authModal'); loginForm.style.display = 'flex'; registerChoice.style.display = 'none'; registerEmailForm.style.display = 'none'; }
+        
+        // Hide loader when done
+        if(appLoader) appLoader.classList.add('hidden');
+
+    } else { 
+        currentUserUid = null; 
+        resetVisualSettings(); 
+        openModal('authModal'); 
+        loginForm.style.display = 'flex'; 
+        registerChoice.style.display = 'none'; 
+        registerEmailForm.style.display = 'none';
+        
+        // Hide loader to show login screen
+        if(appLoader) appLoader.classList.add('hidden');
+    }
 });
 
+// [ИСПРАВЛЕНИЕ] Функция сохранения теперь не перезаписывает тему, если она есть
 async function saveUserToDb(user, statusOverride = null, extraData = {}) {
     const userRef = doc(db, "users", user.uid); 
     const snap = await getDoc(userRef);
-    let username = user.displayName;
-    if (snap.exists() && snap.data().username) username = snap.data().username;
-    if (extraData.username) username = extraData.username;
-
-    const data = { 
-        uid: user.uid, displayName: user.displayName || "User", username: username || "user", email: user.email, 
+    
+    let userData = {
+        uid: user.uid, 
+        displayName: user.displayName || "User", 
+        email: user.email, 
         photoURL: user.photoURL || "https://cdn-icons-png.flaticon.com/512/847/847969.png", 
-        lastLogin: serverTimestamp(), ...extraData 
-    }; 
-    if (statusOverride) data.status = statusOverride; 
-    await setDoc(userRef, data, { merge: true });
+        lastLogin: serverTimestamp(),
+        ...extraData
+    };
+
+    // Если пользователь уже есть, сохраняем его существующие настройки
+    if (snap.exists()) {
+        const existingData = snap.data();
+        if (existingData.username) userData.username = existingData.username;
+        // Не перезаписываем тему дефолтной, если не передана новая
+        if (!extraData.theme && existingData.theme) userData.theme = existingData.theme;
+        if (!extraData.bgPattern && existingData.bgPattern) userData.bgPattern = existingData.bgPattern;
+    } else {
+        // Если новый пользователь, ставим дефолт
+        if (!userData.username) userData.username = "user";
+    }
+
+    if (statusOverride) userData.status = statusOverride; 
+    
+    await setDoc(userRef, userData, { merge: true });
 }
 
-// --- ЛОГИКА SETUP ПРОФИЛЯ ---
+// --- SETUP PROFILE LOGIC ---
 if(setupAvatarUrl) {
     setupAvatarUrl.addEventListener('input', () => { setupAvatarPreview.src = setupAvatarUrl.value || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'; });
 }
@@ -294,7 +292,7 @@ if(finishSetupBtn) {
     });
 }
 
-// --- ЛОГИКА РЕДАКТИРОВАНИЯ ПРОФИЛЯ ---
+// --- EDIT PROFILE LOGIC ---
 if(openEditProfileBtn) {
     openEditProfileBtn.addEventListener('click', async () => {
         closeModal('settingsModal');
@@ -310,7 +308,7 @@ if(openEditProfileBtn) {
         }
     });
 }
-if(closeEditProfile) closeEditProfile.addEventListener('click', () => { closeModal('editProfileModal'); openModal('settingsModal'); }); // Возврат в настройки
+if(closeEditProfile) closeEditProfile.addEventListener('click', () => { closeModal('editProfileModal'); openModal('settingsModal'); }); 
 if(editAvatarUrl) editAvatarUrl.addEventListener('input', () => { editAvatarPreview.src = editAvatarUrl.value || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'; });
 
 if(saveProfileChangesBtn) {

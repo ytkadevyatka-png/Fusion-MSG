@@ -29,13 +29,58 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; font-weight: 500; }
 
+html, body {
+    width: 100%;
+    height: 100dvh; 
+    margin: 0;
+    padding: 0;
+    overflow: hidden; 
+    background: var(--bg-gradient); 
+    background-size: 400% 400%; 
+    color: var(--text-color); 
+    transition: color 0.3s;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.message-bubble, input, textarea, .profile-id-box {
+    -webkit-user-select: text;
+    user-select: text;
+}
+
 button, input, textarea, select {
     font-family: inherit; border: none; outline: none; box-shadow: none; color: var(--text-color) !important;
 }
 
 button { cursor: pointer; background: transparent; transition: 0.2s ease; }
 
-body { width: 100vw; height: 100vh; overflow: hidden; background: var(--bg-gradient); background-size: 400% 400%; color: var(--text-color); transition: color 0.3s; }
+/* === ЗАГРУЗОЧНЫЙ ЭКРАН === */
+.app-loader {
+    position: fixed;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    background: var(--modal-bg);
+    z-index: 99999;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 0.5s ease, visibility 0.5s ease;
+}
+.app-loader.hidden { opacity: 0; visibility: hidden; }
+.loader-spinner {
+    width: 50px; height: 50px;
+    border: 5px solid rgba(0,0,0,0.1);
+    border-top: 5px solid var(--primary-color);
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin-bottom: 20px;
+}
+@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+.loader-text { font-size: 24px; font-weight: 700; margin-bottom: 5px; color: var(--text-color); }
+.loader-sub { font-size: 14px; color: var(--text-sub); }
+
+/* Анимации фона */
 body.bg-static { animation: none !important; background-position: center !important; }
 body.bg-flow { animation: animFlow 15s ease infinite; background-size: 400% 400%; }
 body.bg-ocean { background: linear-gradient(-45deg, #006994, #003366, #001f3f, #008080); background-size: 400% 400%; animation: animOcean 20s ease infinite; }
@@ -69,9 +114,30 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 [data-theme="cream"] { --bg-gradient: #fdfcf0; --primary-color: #556b2f; --my-msg-bg: #556b2f; --my-msg-text: #fff; --text-color: #000; --text-sub: #222; }
 [data-theme="rose-gold"] { --bg-gradient: linear-gradient(to right, #eecda3, #ef629f); --primary-color: #8b7500; --my-msg-bg: #8b7500; --text-color: #000; --text-sub: #222; }
 
-.app-layout { display: flex; width: 100%; height: 100%; backdrop-filter: blur(5px); }
-.sidebar { width: 320px; min-width: 320px; background: var(--sidebar-bg); border-right: var(--glass-border); display: flex; flex-direction: column; z-index: 10; transition: background 0.3s; }
-.sidebar-header { height: 70px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: var(--glass-border); background: rgba(0,0,0,0.05); }
+/* === LAYOUT === */
+.app-layout { 
+    display: flex; 
+    width: 100%; 
+    height: 100%; 
+    height: 100dvh; 
+    backdrop-filter: blur(5px); 
+    overflow: hidden;
+}
+
+/* Sidebar */
+.sidebar { 
+    width: 320px; 
+    min-width: 320px; 
+    background: var(--sidebar-bg); 
+    border-right: var(--glass-border); 
+    display: flex; 
+    flex-direction: column; 
+    z-index: 10; 
+    transition: background 0.3s; 
+    height: 100%;
+}
+
+.sidebar-header { height: 70px; min-height: 70px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: var(--glass-border); background: rgba(0,0,0,0.05); }
 .sidebar-header h2 { color: var(--text-color); font-size: 20px; font-weight: 700; }
 .icon-btn { color: var(--text-color); background: none; border: none; cursor: pointer; display: flex; align-items: center; opacity: 0.9; transition: 0.3s; }
 .icon-btn:hover { opacity: 1; transform: scale(1.1); }
@@ -79,12 +145,18 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 .notification-badge { position: absolute; top: 0px; right: 0px; width: 10px; height: 10px; background: #ff4444; border-radius: 50%; border: 2px solid var(--sidebar-bg); }
 .notification-badge-small { display: inline-flex; align-items: center; justify-content: center; background: #ff4444; color: white; font-size: 10px; border-radius: 10px; padding: 2px 6px; margin-left: auto; }
 
-.sidebar-menu { padding: 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: var(--glass-border); }
+.sidebar-menu { padding: 10px; display: flex; flex-direction: column; gap: 8px; border-bottom: var(--glass-border); flex-shrink: 0; }
 .menu-btn { display: flex; align-items: center; gap: 12px; padding: 12px 15px; background: var(--btn-secondary-bg); border: 1px solid rgba(0,0,0,0.05); border-radius: 12px; color: var(--text-color); font-size: 14px; font-weight: 600; cursor: pointer; transition: 0.2s; text-align: left; }
 .menu-btn:hover { opacity: 0.8; transform: translateY(-1px); }
 .menu-btn span.material-symbols-outlined { font-size: 20px; }
 
-.chats-list { flex: 1; overflow-y: auto; padding: 10px; }
+.chats-list { 
+    flex: 1; 
+    overflow-y: auto; 
+    padding: 10px; 
+    -webkit-overflow-scrolling: touch; 
+}
+
 .chat-user-item { display: flex; align-items: center; padding: 10px; border-radius: 12px; cursor: pointer; transition: 0.2s; margin-bottom: 5px; }
 .chat-user-item:hover { background: var(--btn-secondary-bg); }
 .avatar-wrapper { position: relative; margin-right: 12px; }
@@ -105,7 +177,16 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 .user-name { font-weight: 700; color: var(--text-color); font-size: 15px; }
 .user-status-text { font-size: 12px; color: var(--text-sub); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; font-weight: 500; }
 
-.sidebar-bottom-wrapper { background: rgba(0,0,0,0.05); border-top: var(--glass-border); padding: 10px; display: flex; flex-direction: column; gap: 8px; }
+.sidebar-bottom-wrapper { 
+    background: rgba(0,0,0,0.05); 
+    border-top: var(--glass-border); 
+    padding: 10px; 
+    display: flex; 
+    flex-direction: column; 
+    gap: 8px; 
+    margin-top: auto;
+}
+
 .activity-status-bar { display: flex; align-items: center; gap: 5px; font-size: 11px; color: var(--text-sub); padding: 2px 5px; background: rgba(0,0,0,0.05); border-radius: 4px; width: fit-content; font-weight: 600; }
 .icon-tiny { font-size: 12px !important; color: var(--status-online); }
 .user-mini-profile { display: flex; align-items: center; gap: 10px; transition: 0.2s; padding: 5px; border-radius: 10px; }
@@ -116,15 +197,15 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 .mini-status { font-size: 11px; color: var(--text-sub); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tiny-btn { width: 30px; height: 30px; font-size: 18px; border-radius: 50%; background: var(--btn-secondary-bg); color: var(--text-color); } .tiny-btn:hover { background: var(--nav-hover); } .tiny-btn.active { background: #ff4444; color: white; }
 
-.main-content { flex: 1; display: flex; flex-direction: column; background: var(--main-bg); position: relative; transition: background 0.3s; overflow: hidden; }
+/* Main Content */
+.main-content { flex: 1; display: flex; flex-direction: column; background: var(--main-bg); position: relative; transition: background 0.3s; overflow: hidden; height: 100%; }
 .empty-state { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; color: var(--text-sub); font-weight: 600; }
 .empty-content { text-align: center; background: var(--sidebar-bg); padding: 40px; border-radius: 20px; border: var(--glass-border); }
 .chat-room { display: flex; flex-direction: column; height: 100%; width: 100%; }
-.chat-header { height: 70px; padding: 0 20px; display: flex; align-items: center; border-bottom: var(--glass-border); background: var(--sidebar-bg); }
-/* Хак для кнопки назад */
+.chat-header { height: 70px; min-height: 70px; padding: 0 20px; display: flex; align-items: center; border-bottom: var(--glass-border); background: var(--sidebar-bg); }
 .chat-header > .icon-btn:first-child { margin-right: 15px; }
 
-.header-user-info { display: flex; align-items: center; gap: 15px; flex: 1; } /* flex: 1, чтобы занять место */
+.header-user-info { display: flex; align-items: center; gap: 15px; flex: 1; }
 .header-avatar img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid rgba(127,127,127,0.3); }
 .chat-title-name { font-weight: 700; font-size: 17px; color: var(--text-color); }
 .header-status-text { font-size: 13px; color: var(--text-sub); font-weight: 500; }
@@ -137,7 +218,8 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 .input-wrapper input { flex: 1; border: none; padding: 12px 20px; border-radius: 30px; outline: none; font-size: 16px; background: transparent; color: var(--text-color); font-weight: 500; }
 .send-btn { width: 45px; height: 45px; border-radius: 50%; border: none; background: var(--primary-color); color: var(--on-primary-text); cursor: pointer; display: flex; justify-content: center; align-items: center; padding-left: 3px; transition: 0.2s; } .send-btn:hover { transform: scale(1.1); }
 
-.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 9999; opacity: 0; transition: opacity 0.3s ease; }
+/* Модалки */
+.modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; height: 100dvh; background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); display: none; justify-content: center; align-items: center; z-index: 9999; opacity: 0; transition: opacity 0.3s ease; }
 .modal.show { display: flex; opacity: 1; }
 .glass-panel { background: var(--modal-bg); border-radius: 20px; box-shadow: 0 20px 60px rgba(0,0,0,0.5); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); transform: scale(0.95); color: var(--text-color); border: var(--glass-border); }
 .modal.show .glass-panel { transform: scale(1); }
@@ -255,29 +337,39 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
    ========================================= */
 @media (max-width: 768px) {
     /* 1. Общий лейаут */
-    .app-layout { position: relative; }
-    .sidebar { width: 100%; height: 100vh; position: absolute; z-index: 10; border-right: none; }
+    .app-layout { position: relative; height: 100dvh; }
+    .sidebar { width: 100%; height: 100dvh; position: absolute; z-index: 10; border-right: none; display: flex; flex-direction: column; }
     
-    /* 2. Чат комната (по умолчанию скрыта, открывается поверх) */
+    /* [ИСПРАВЛЕНИЕ] Добавляем отступы снизу для iPhone (Safe Area) и принудительно показываем профиль */
+    .sidebar-bottom-wrapper {
+        padding-bottom: calc(10px + env(safe-area-inset-bottom));
+        margin-top: auto; /* Прибиваем к низу */
+        background: var(--sidebar-bg); /* Чтобы не было прозрачно на фоне чатов */
+    }
+
+    /* Список чатов занимает всё доступное место, толкая профиль вниз */
+    .chats-list {
+        flex: 1;
+    }
+
+    /* 2. Чат комната */
     .main-content { 
         position: absolute; 
         top: 0; 
         left: 0; 
         width: 100%; 
-        height: 100vh; 
+        height: 100dvh; 
         z-index: 20; 
-        display: none; /* Контролируется классом body */
+        display: none; 
     }
     
-    /* Состояние: Чат открыт */
     body.mobile-chat-open .sidebar { display: none; }
     body.mobile-chat-open .main-content { display: flex; }
     
-    /* Показываем кнопку назад на мобильных */
     #backToChatsBtn { display: block !important; }
 
     /* 3. Модалки */
-    .split-modal-layout { width: 95%; height: 85%; flex-direction: column; overflow-y: auto; }
+    .split-modal-layout { width: 95%; height: 85%; flex-direction: column; overflow-y: auto; max-height: 85dvh; }
     .split-sidebar { width: 100%; height: auto; flex-direction: row; overflow-x: auto; border-right: none; border-bottom: 1px solid rgba(127,127,127,0.2); padding: 10px; }
     .modal-nav-item { white-space: nowrap; font-size: 12px; padding: 8px 12px; }
     .split-content { padding: 15px; }
@@ -288,5 +380,5 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 
     /* 4. Звонок */
     .call-embedded { height: 100%; max-height: 100%; border-radius: 0; }
-    .resize-handle { display: none; } /* Отключаем ресайз на мобиле */
+    .resize-handle { display: none; }
 }
