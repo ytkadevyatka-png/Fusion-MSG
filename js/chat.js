@@ -11,9 +11,6 @@ let currentChatId = null;
 let currentChatType = null;
 let messagesUnsubscribe = null;
 
-// [НОВОЕ] Переменная для слежения за существованием юзера в реальном времени
-let activeChatUserUnsubscribe = null; 
-
 // Элементы
 const chatsList = document.getElementById('chatsList');
 const chatRoom = document.getElementById('chatRoom');
@@ -106,7 +103,6 @@ function setupFriendListeners(friendUids) {
             }
             renderChatList();
             renderMyFriendsList();
-            // Обновляем заголовок, если мы в чате с этим юзером
             if (currentChatType === 'direct' && currentChatUser && currentChatUser.uid === uid) {
                 const user = myFriendsData.find(u => u.uid === uid);
                 updateChatHeader(user.displayName, user.photoURL, user.status);
@@ -174,6 +170,7 @@ export function initChat() {
         const qGroups = query(collection(db, "groups"), where("members", "array-contains", user.uid));
         onSnapshot(qGroups, (snapshot) => { allGroupsData = []; snapshot.forEach(doc => allGroupsData.push({ id: doc.id, ...doc.data() })); renderChatList(); });
         
+        // Слушатель заявок в друзья
         const qRequests = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "pending"));
         onSnapshot(qRequests, (snapshot) => {
             const count = snapshot.docs.length;
@@ -228,7 +225,7 @@ function renderChatList() {
     }
 }
 
-// [НОВОЕ] Сброс UI чата (когда юзер удалился)
+// Сброс UI чата (когда юзер удалился)
 function resetChatUI() {
     chatRoom.style.display = 'none';
     emptyState.style.display = 'flex';
@@ -238,8 +235,9 @@ function resetChatUI() {
     updateUserActivity("В меню");
 }
 
+let activeChatUserUnsubscribe = null; 
+
 function openChat(target, type) {
-    // 1. Отписываемся от предыдущей проверки (если была)
     if (activeChatUserUnsubscribe) {
         activeChatUserUnsubscribe();
         activeChatUserUnsubscribe = null;
@@ -253,14 +251,11 @@ function openChat(target, type) {
         currentChatUser = target; currentChatGroup = null; const ids = [auth.currentUser.uid, target.uid].sort(); currentChatId = ids[0] + "_" + ids[1];
         updateChatHeader(target.displayName, target.photoURL, target.status);
 
-        // [НОВОЕ] 2. Подписываемся на документ собеседника, чтобы следить за его существованием
         const userDocRef = doc(db, "users", target.uid);
         activeChatUserUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
             if (!docSnap.exists()) {
-                // Если документ исчез (пользователь удалил аккаунт)
                 showToast("Пользователь удалил свой аккаунт", "info");
-                resetChatUI(); // Выбрасываем из чата
-                // Отписка происходит внутри resetChatUI косвенно, но лучше почистить и тут
+                resetChatUI();
                 if (activeChatUserUnsubscribe) activeChatUserUnsubscribe();
             }
         });
@@ -269,7 +264,6 @@ function openChat(target, type) {
         currentChatGroup = target; currentChatUser = null; currentChatId = target.id;
         updateChatHeader(target.name, "https://cdn-icons-png.flaticon.com/512/681/681494.png", 'group');
         
-        // Для групп тоже можно добавить проверку, если группу удалил создатель
         const groupDocRef = doc(db, "groups", target.id);
         activeChatUserUnsubscribe = onSnapshot(groupDocRef, (docSnap) => {
              if (!docSnap.exists()) {
@@ -310,7 +304,7 @@ function loadMessages() {
             const msg = doc.data(); const isMe = msg.senderId === auth.currentUser.uid;
             if (msg.type === 'system') { const sysDiv = document.createElement('div'); sysDiv.style.textAlign = 'center'; sysDiv.style.fontSize = '12px'; sysDiv.style.color = 'var(--text-sub)'; sysDiv.style.margin = '10px 0'; sysDiv.textContent = msg.text; messagesList.appendChild(sysDiv); return; }
             const msgDiv = document.createElement('div'); msgDiv.className = `message-bubble ${isMe ? 'my-message' : 'friend-message'}`;
-            if (currentChatType === 'group' && !isMe) { const nameLabel = document.createElement('div'); style="font-size: 11px; color: #888; margin-bottom: 2px;"; nameLabel.textContent = msg.senderName; msgDiv.appendChild(nameLabel); }
+            if (currentChatType === 'group' && !isMe) { const nameLabel = document.createElement('div'); nameLabel.style.fontSize = '11px'; nameLabel.style.color = '#888'; nameLabel.style.marginBottom = '2px'; nameLabel.textContent = msg.senderName; msgDiv.appendChild(nameLabel); }
             const textNode = document.createElement('div'); textNode.textContent = msg.text; msgDiv.appendChild(textNode); messagesList.appendChild(msgDiv);
         });
         messagesList.scrollTop = messagesList.scrollHeight;
@@ -337,18 +331,53 @@ userSearchBtn.addEventListener('click', async () => {
     const snapshot = await getDocs(q);
     searchResultsList.innerHTML = '';
     if (snapshot.empty) { searchResultsList.innerHTML = '<div style="padding:10px;">Никого не найдено</div>'; return; }
+    
     snapshot.forEach(docSnap => {
-        const user = docSnap.data(); if (user.uid === auth.currentUser.uid) return;
+        // [ИСПРАВЛЕНИЕ] Гарантированно получаем UID из ID документа
+        const userData = docSnap.data();
+        const user = { ...userData, uid: docSnap.id }; 
+        
+        if (user.uid === auth.currentUser.uid) return;
+        
         const isFriend = myFriendsData.some(f => f.uid === user.uid);
+        
         const card = document.createElement('div'); card.className = 'friend-card';
         card.innerHTML = `<img src="${user.photoURL}"><div class="friend-name">${user.displayName} <span style='font-size:11px;color:#888'>@${user.username||''}</span></div>${!isFriend ? `<button class="btn-add-friend" data-uid="${user.uid}">Добавить</button>` : '<span style="font-size:12px;color:green;">Друзья</span>'}`;
-        if (!isFriend) card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
+        
+        if (!isFriend) {
+            card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
+        }
         searchResultsList.appendChild(card);
     });
 });
 
 async function sendFriendRequest(targetUser) {
-    try { await addDoc(collection(db, "friend_requests"), { from: auth.currentUser.uid, to: targetUser.uid, fromName: auth.currentUser.displayName, fromPhoto: auth.currentUser.photoURL, status: 'pending', timestamp: serverTimestamp() }); showToast("Заявка отправлена", "success"); } catch (e) { showToast("Ошибка: " + e.message, "error"); }
+    if (!targetUser || !targetUser.uid) return showToast("Ошибка: пользователь не найден", "error");
+
+    try { 
+        // Проверяем, не отправляли ли уже
+        const checkQ = query(collection(db, "friend_requests"), 
+            where("from", "==", auth.currentUser.uid), 
+            where("to", "==", targetUser.uid));
+        
+        const checkSnap = await getDocs(checkQ);
+        if (!checkSnap.empty) {
+            return showToast("Заявка уже отправлена", "info");
+        }
+
+        await addDoc(collection(db, "friend_requests"), { 
+            from: auth.currentUser.uid, 
+            to: targetUser.uid, 
+            fromName: auth.currentUser.displayName, 
+            fromPhoto: auth.currentUser.photoURL, 
+            status: 'pending', 
+            timestamp: serverTimestamp() 
+        }); 
+        showToast("Заявка отправлена", "success"); 
+    } catch (e) { 
+        console.error(e);
+        showToast("Ошибка: " + e.message, "error"); 
+    }
 }
 
 function renderFriendRequests(docs) {

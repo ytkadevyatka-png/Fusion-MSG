@@ -115,6 +115,44 @@
         </main>
     </div>
 
+    <div id="initialSetupModal" class="modal" style="z-index: 20000;">
+        <div class="glass-panel profile-card-container">
+            <h2 class="modal-title">Добро пожаловать!</h2>
+            <p style="margin-bottom: 20px; color: var(--text-sub); font-size: 14px;">Давайте настроим ваш профиль перед началом общения.</p>
+            
+            <div class="avatar-upload-preview">
+                <img id="setupAvatarPreview" src="https://cdn-icons-png.flaticon.com/512/847/847969.png">
+            </div>
+            <input type="text" id="setupAvatarUrl" class="settings-input" placeholder="Ссылка на аватар (URL)">
+            
+            <input type="text" id="setupDisplayName" class="settings-input" placeholder="Ваше имя (видно всем)">
+            <input type="text" id="setupUsername" class="settings-input" placeholder="@username (уникальный)">
+            
+            <button id="finishSetupBtn" class="primary-btn" style="width: 100%;">Начать общение</button>
+        </div>
+    </div>
+
+    <div id="editProfileModal" class="modal">
+        <div class="glass-panel profile-card-container">
+            <span id="closeEditProfile" class="close-btn">&times;</span>
+            <h3 class="modal-title">Редактирование</h3>
+            
+            <div class="avatar-upload-preview">
+                <img id="editAvatarPreview" src="">
+            </div>
+            <label style="font-size: 12px; color: var(--text-sub); align-self: flex-start; margin-bottom: 5px;">Ссылка на аватар</label>
+            <input type="text" id="editAvatarUrl" class="settings-input" placeholder="https://...">
+            
+            <label style="font-size: 12px; color: var(--text-sub); align-self: flex-start; margin-bottom: 5px;">Отображаемое имя</label>
+            <input type="text" id="editDisplayName" class="settings-input">
+            
+            <label style="font-size: 12px; color: var(--text-sub); align-self: flex-start; margin-bottom: 5px;">Username (раз в 1 мин)</label>
+            <input type="text" id="editUsername" class="settings-input">
+            
+            <button id="saveProfileChangesBtn" class="primary-btn" style="width: 100%;">Сохранить</button>
+        </div>
+    </div>
+
     <div id="currentUserProfileModal" class="modal">
         <div class="glass-panel profile-card-container">
             <span id="closeUserProfile" class="close-btn">&times;</span>
@@ -195,6 +233,7 @@
                 <div id="tab-profile" class="tab-pane active">
                     <h3 class="modal-title">Мой профиль</h3>
                     <div id="settingsProfileInfo" class="profile-large"></div>
+                    <button id="openEditProfileBtn" class="primary-btn" style="width: 100%; margin-top: 10px;">Редактировать профиль</button>
                 </div>
                 
                 <div id="tab-status" class="tab-pane">
@@ -270,7 +309,6 @@
     </div>
 
     <div id="createGroupModal" class="modal"><div class="glass-panel group-creation-container"><div class="group-modal-header"><h2>Новая группа</h2><span id="closeCreateGroup" class="close-icon-btn"><span class="material-symbols-outlined">close</span></span></div><div class="group-input-area"><div class="group-avatar-placeholder"><span class="material-symbols-outlined">groups</span></div><input type="text" id="newGroupName" class="group-name-input" placeholder="Название..." autocomplete="off"></div><div class="group-members-label">Участники</div><div id="usersForGroupList" class="users-grid-selector"></div><div class="group-modal-footer"><button id="confirmCreateGroupBtn" class="primary-btn create-btn"><span class="material-symbols-outlined">check</span> Создать</button></div></div></div>
-    <div id="groupInfoModal" class="modal"><div class="glass-panel" style="width: 350px; text-align: center; padding: 20px;"><span id="closeGroupInfo" class="close-btn">&times;</span><div class="group-avatar-placeholder" style="margin: 0 auto 15px; width: 80px; height: 80px;"><span class="material-symbols-outlined" style="font-size: 40px;">groups</span></div><h2 id="infoGroupName" style="margin-bottom: 5px;">...</h2><p id="infoGroupCount" style="color: var(--text-sub); font-size: 14px; margin-bottom: 25px;">...</p><div id="groupCreatorActions" style="display: none;"><p style="font-size: 12px; color: #ff4444; margin-bottom: 10px;">Вы создатель</p><button id="deleteGroupBtn" class="danger-btn">Удалить группу</button></div><div id="groupMemberActions" style="display: none;"><div style="margin-bottom: 15px; text-align: left; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 8px;"><label style="display: flex; align-items: center; gap: 10px; cursor: pointer;"><input type="checkbox" id="notifyLeaveCheck"><span style="font-size: 14px;">Уведомить</span></label></div><button id="leaveGroupBtn" class="danger-btn" style="background: #ff9800;">Покинуть группу</button></div></div></div>
     <div id="customConfirmModal" class="modal"><div class="glass-panel" style="width: 320px; text-align: center; padding: 30px;"><div style="margin-bottom: 15px; color: var(--primary-color);"><span class="material-symbols-outlined" style="font-size: 40px;">help</span></div><h3 style="margin-bottom: 10px;">Подтверждение</h3><p id="confirmMessage" style="color: var(--text-sub); margin-bottom: 25px; font-size: 14px; line-height: 1.4;">...</p><div class="confirm-actions"><button id="confirmCancelBtn" class="secondary-btn">Отмена</button><button id="confirmOkBtn" class="primary-btn">Да</button></div></div></div>
 
     <div id="authModal" class="modal" style="display: none;">
@@ -281,6 +319,7 @@
         <div id="registerEmailForm" class="glass-panel auth-container" style="display: none;"><h2>Новый аккаунт</h2><input type="text" id="regUsername" class="settings-input" placeholder="@username"><input type="email" id="regEmail" class="settings-input" placeholder="Email"><input type="password" id="regPassword" class="settings-input" placeholder="Пароль"><input type="password" id="regPasswordConfirm" class="settings-input" placeholder="Повтор"><div class="code-section"><button id="regSendCodeBtn" class="secondary-btn">Код</button><input type="text" id="regCodeInput" class="settings-input" placeholder="Код" style="width: 80px;"></div><div id="regTimer" style="color:red; font-size:12px; height:15px;"></div><button id="regBtn" class="primary-btn">Создать</button><p style="text-align:center; margin-top:10px;"><a href="#" id="backToChoice">Назад</a></p></div>
     </div>
     
+    <div id="groupInfoModal" class="modal"><div class="glass-panel" style="width: 350px; text-align: center; padding: 20px;"><span id="closeGroupInfo" class="close-btn">&times;</span><div class="group-avatar-placeholder" style="margin: 0 auto 15px; width: 80px; height: 80px;"><span class="material-symbols-outlined" style="font-size: 40px;">groups</span></div><h2 id="infoGroupName" style="margin-bottom: 5px;">...</h2><p id="infoGroupCount" style="color: var(--text-sub); font-size: 14px; margin-bottom: 25px;">...</p><div id="groupCreatorActions" style="display: none;"><p style="font-size: 12px; color: #ff4444; margin-bottom: 10px;">Вы создатель</p><button id="deleteGroupBtn" class="danger-btn">Удалить группу</button></div><div id="groupMemberActions" style="display: none;"><div style="margin-bottom: 15px; text-align: left; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 8px;"><label style="display: flex; align-items: center; gap: 10px; cursor: pointer;"><input type="checkbox" id="notifyLeaveCheck"><span style="font-size: 14px;">Уведомить</span></label></div><button id="leaveGroupBtn" class="danger-btn" style="background: #ff9800;">Покинуть группу</button></div></div></div>
     <div id="incomingCallModal" class="modal"><div class="glass-panel" style="text-align: center; width: 300px; padding: 30px;"><div class="incoming-avatar"><img id="incomingAvatarImg" src="https://cdn-icons-png.flaticon.com/512/847/847969.png"></div><h3 id="incomingCallerName">Входящий звонок</h3><p style="color: var(--text-sub); margin-bottom: 25px;">Голосовой вызов</p><div style="display: flex; gap: 30px; justify-content: center;"><button id="answerCallBtn" class="call-btn btn-answer"><span class="material-symbols-outlined">call</span></button><button id="rejectCallBtn" class="call-btn btn-hangup"><span class="material-symbols-outlined">call_end</span></button></div></div></div>
 
     <script type="module" src="./js/firebase-config.js"></script>
