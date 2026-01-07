@@ -4,22 +4,11 @@ import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/fi
 import { showToast, openModal, closeModal } from "./toast.js";
 import { isGlobalMuted, updateUserActivity } from "./chat.js";
 
-// [ИСПРАВЛЕНИЕ] Расширенный список STUN серверов для пробива NAT
-const servers = {
-    iceServers: [
-        { urls: [
-            'stun:stun1.l.google.com:19302', 
-            'stun:stun2.l.google.com:19302',
-            'stun:stun.l.google.com:19302',
-            'stun:global.stun.twilio.com:3478'
-        ]}
-    ]
-};
+const servers = { iceServers: [{ urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }] };
 
 let pc = null;
 let localStream = null;
 let currentCallDocId = null;
-let activeCallTargetId = null; 
 let unsubscribeCall = null;
 let unsubscribeIncoming = null;
 let unsubscribeGlobalListener = null;
@@ -47,111 +36,65 @@ const incomingAvatarImg = document.getElementById('incomingAvatarImg');
 const answerCallBtn = document.getElementById('answerCallBtn');
 const rejectCallBtn = document.getElementById('rejectCallBtn');
 
-// Звуки
 const soundRingtone = document.getElementById('soundRingtone');
 const soundConnecting = document.getElementById('soundConnecting');
 
-function playSound(type) {
-    stopSounds();
-    if (type === 'ringtone') soundRingtone.play().catch(e=>{});
-    if (type === 'connecting') soundConnecting.play().catch(e=>{});
-}
-function stopSounds() {
-    soundRingtone.pause(); soundRingtone.currentTime = 0;
-    soundConnecting.pause(); soundConnecting.currentTime = 0;
-}
+function playSound(type) { stopSounds(); if (type === 'ringtone') soundRingtone.play().catch(()=>{}); if (type === 'connecting') soundConnecting.play().catch(()=>{}); }
+function stopSounds() { soundRingtone.pause(); soundRingtone.currentTime = 0; soundConnecting.pause(); soundConnecting.currentTime = 0; }
 
-onAuthStateChanged(auth, (user) => {
-    if (user) {
-        currentUser = user;
-        initGlobalCallListener();
-    } else {
-        if (unsubscribeGlobalListener) unsubscribeGlobalListener();
-    }
-});
+onAuthStateChanged(auth, (user) => { if (user) { currentUser = user; initGlobalCallListener(); } else { if (unsubscribeGlobalListener) unsubscribeGlobalListener(); } });
 
 function initGlobalCallListener() {
     if (unsubscribeGlobalListener) unsubscribeGlobalListener();
-    const q = query(collection(db, "calls"), where("responderId", "==", currentUser.uid), where("status", "==", "offer")); // Слушаем только offer
+    const q = query(collection(db, "calls"), where("responderId", "==", currentUser.uid), where("status", "==", "offer"));
     unsubscribeGlobalListener = onSnapshot(q, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
             if (change.type === "added") {
                 const callData = change.doc.data();
-                // Показываем звонок только если мы еще не говорим
-                if (!currentCallDocId) {
-                    showIncomingCall(change.doc.id, callData);
-                }
+                if (!currentCallDocId) { showIncomingCall(change.doc.id, callData); }
             }
         });
     });
+}
+
+function resetMuteState() {
+    muteBtn.classList.remove('active');
+    muteIcon.textContent = 'mic';
+    localAvatarWrapper.classList.remove('muted');
 }
 
 export async function startCall(target, isGroup = false) {
     if (currentCallDocId) return showToast("Вы уже в звонке", "error");
     if (isGroup) return showToast("Групповые звонки пока в разработке", "info");
 
-    isCaller = true;
-    activeCallTargetId = target.uid;
-    currentCallDocId = await createCallDoc(target);
+    isCaller = true; currentCallDocId = await createCallDoc(target);
+    resetMuteState();
     
-    // UI
     callInterface.style.display = 'flex';
-    localCallAvatar.src = currentUser.photoURL;
-    remoteCallAvatar.src = target.photoURL;
-    remoteAvatarLabel.textContent = target.displayName;
-    callStatusText.textContent = "Соединение...";
-    callTimer.style.display = "none";
-    updateUserActivity("Звонит...");
-    playSound('connecting');
+    localCallAvatar.src = currentUser.photoURL; remoteCallAvatar.src = target.photoURL; remoteAvatarLabel.textContent = target.displayName;
+    callStatusText.textContent = "Соединение..."; callTimer.style.display = "none";
+    updateUserActivity("Звонит..."); playSound('connecting');
 
     await initWebRTC();
 }
 
-// Проверка: показать ли интерфейс звонка при возврате в чат
-export function checkCallVisibility(chatId) {
-    if (currentCallDocId && callInterface.style.display !== 'flex') {
-        callInterface.style.display = 'flex'; // Восстанавливаем UI если свернули
-    }
-}
+export function checkCallVisibility(chatId) { if (currentCallDocId && callInterface.style.display !== 'flex') callInterface.style.display = 'flex'; }
 
 async function createCallDoc(target) {
     const callDocRef = doc(collection(db, "calls"));
-    await setDoc(callDocRef, {
-        callerId: currentUser.uid,
-        callerName: currentUser.displayName,
-        callerPhoto: currentUser.photoURL,
-        responderId: target.uid,
-        status: 'offer'
-    });
+    await setDoc(callDocRef, { callerId: currentUser.uid, callerName: currentUser.displayName, callerPhoto: currentUser.photoURL, responderId: target.uid, status: 'offer' });
     return callDocRef.id;
 }
 
 async function initWebRTC() {
     pc = new RTCPeerConnection(servers);
-
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    localStream.getTracks().forEach(track => {
-        track.enabled = !isGlobalMuted; // Применяем глобальный мут
-        pc.addTrack(track, localStream);
-    });
+    localStream.getTracks().forEach(track => { track.enabled = true; pc.addTrack(track, localStream); });
     
-    // Визуализация голоса (локальная)
     setupVoiceActivity(localStream, localAvatarWrapper);
 
-    pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach(track => {
-            remoteAudio.srcObject = event.streams[0];
-            // Визуализация голоса (удаленная)
-            setupVoiceActivity(event.streams[0], remoteAvatarWrapper);
-        });
-    };
-
-    pc.onicecandidate = (event) => {
-        if (event.candidate && currentCallDocId) {
-            const collectionName = isCaller ? 'offerCandidates' : 'answerCandidates';
-            addDoc(collection(db, "calls", currentCallDocId, collectionName), event.candidate.toJSON());
-        }
-    };
+    pc.ontrack = (event) => { event.streams[0].getTracks().forEach(track => { remoteAudio.srcObject = event.streams[0]; setupVoiceActivity(event.streams[0], remoteAvatarWrapper); }); };
+    pc.onicecandidate = (event) => { if (event.candidate && currentCallDocId) { const collectionName = isCaller ? 'offerCandidates' : 'answerCandidates'; addDoc(collection(db, "calls", currentCallDocId, collectionName), event.candidate.toJSON()); } };
 
     const callDocRef = doc(db, "calls", currentCallDocId);
 
@@ -165,61 +108,32 @@ async function initWebRTC() {
             if (!pc.currentRemoteDescription && data?.answer) {
                 const answerDescription = new RTCSessionDescription(data.answer);
                 pc.setRemoteDescription(answerDescription);
-                callStatusText.textContent = "00:00";
-                startTimer();
-                stopSounds();
+                callStatusText.textContent = "00:00"; startTimer(); stopSounds();
             }
             if (data?.status === 'hungup') endCall();
         });
 
         onSnapshot(collection(db, "calls", currentCallDocId, "answerCandidates"), (snapshot) => {
-            snapshot.docChanges().forEach((change) => {
-                if (change.type === "added") {
-                    const candidate = new RTCIceCandidate(change.doc.data());
-                    pc.addIceCandidate(candidate);
-                }
-            });
+            snapshot.docChanges().forEach((change) => { if (change.type === "added") { const candidate = new RTCIceCandidate(change.doc.data()); pc.addIceCandidate(candidate); } });
         });
-    } else {
-        // Responder logic inside answerCall
     }
 }
 
 async function answerCall(callId, callData) {
-    if (currentCallDocId) return; // Busy
-    currentCallDocId = callId;
-    isCaller = false;
+    if (currentCallDocId) return; 
+    currentCallDocId = callId; isCaller = false; resetMuteState();
     
     callInterface.style.display = 'flex';
-    localCallAvatar.src = currentUser.photoURL;
-    remoteCallAvatar.src = callData.callerPhoto;
-    remoteAvatarLabel.textContent = callData.callerName;
-    callStatusText.textContent = "Соединение...";
-    callTimer.style.display = "none";
-    updateUserActivity("В звонке");
-    stopSounds();
+    localCallAvatar.src = currentUser.photoURL; remoteCallAvatar.src = callData.callerPhoto; remoteAvatarLabel.textContent = callData.callerName;
+    callStatusText.textContent = "Соединение..."; callTimer.style.display = "none"; updateUserActivity("В звонке"); stopSounds();
 
     pc = new RTCPeerConnection(servers);
-    
     localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    localStream.getTracks().forEach(track => {
-        track.enabled = !isGlobalMuted;
-        pc.addTrack(track, localStream);
-    });
+    localStream.getTracks().forEach(track => { track.enabled = true; pc.addTrack(track, localStream); });
     setupVoiceActivity(localStream, localAvatarWrapper);
 
-    pc.ontrack = (event) => {
-        event.streams[0].getTracks().forEach(track => {
-            remoteAudio.srcObject = event.streams[0];
-            setupVoiceActivity(event.streams[0], remoteAvatarWrapper);
-        });
-    };
-
-    pc.onicecandidate = (event) => {
-        if (event.candidate) {
-            addDoc(collection(db, "calls", currentCallDocId, "answerCandidates"), event.candidate.toJSON());
-        }
-    };
+    pc.ontrack = (event) => { event.streams[0].getTracks().forEach(track => { remoteAudio.srcObject = event.streams[0]; setupVoiceActivity(event.streams[0], remoteAvatarWrapper); }); };
+    pc.onicecandidate = (event) => { if (event.candidate) { addDoc(collection(db, "calls", currentCallDocId, "answerCandidates"), event.candidate.toJSON()); } };
 
     const callDocRef = doc(db, "calls", currentCallDocId);
     const callSnap = await getDoc(callDocRef);
@@ -229,27 +143,14 @@ async function answerCall(callId, callData) {
     const answerDescription = await pc.createAnswer();
     await pc.setLocalDescription(answerDescription);
 
-    await updateDoc(callDocRef, { 
-        answer: { type: answerDescription.type, sdp: answerDescription.sdp },
-        status: 'connected'
-    });
-    
-    callStatusText.textContent = "00:00";
-    startTimer();
+    await updateDoc(callDocRef, { answer: { type: answerDescription.type, sdp: answerDescription.sdp }, status: 'connected' });
+    callStatusText.textContent = "00:00"; startTimer();
 
     onSnapshot(collection(db, "calls", currentCallDocId, "offerCandidates"), (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === "added") {
-                const candidate = new RTCIceCandidate(change.doc.data());
-                pc.addIceCandidate(candidate);
-            }
-        });
+        snapshot.docChanges().forEach((change) => { if (change.type === "added") { const candidate = new RTCIceCandidate(change.doc.data()); pc.addIceCandidate(candidate); } });
     });
     
-    unsubscribeCall = onSnapshot(callDocRef, (snapshot) => {
-        const data = snapshot.data();
-        if (data?.status === 'hungup') endCall();
-    });
+    unsubscribeCall = onSnapshot(callDocRef, (snapshot) => { const data = snapshot.data(); if (data?.status === 'hungup') endCall(); });
 }
 
 function endCall() {
@@ -259,46 +160,27 @@ function endCall() {
     if (unsubscribeCall) { unsubscribeCall(); unsubscribeCall = null; }
     if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
     
-    callInterface.style.display = 'none';
-    callStatusText.textContent = "";
-    updateUserActivity("В сети"); // Возвращаем статус
+    callInterface.style.display = 'none'; callStatusText.textContent = ""; updateUserActivity("В сети");
 
-    if (currentCallDocId) {
-        // Удаляем документ звонка (чистка)
-        try { 
-            // Обновляем статус на 'hungup' перед удалением, чтобы второй собеседник понял
-            const callDocRef = doc(db, "calls", currentCallDocId);
-            updateDoc(callDocRef, { status: 'hungup' }); 
-        } catch(e) {} 
-        currentCallDocId = null; 
-    }
+    if (currentCallDocId) { try { const callDocRef = doc(db, "calls", currentCallDocId); updateDoc(callDocRef, { status: 'hungup' }); } catch(e) {} currentCallDocId = null; }
 }
 
 function showIncomingCall(callId, callData) {
     playSound('ringtone');
     incomingCallerName.textContent = callData.groupName ? `Группа: ${callData.groupName}\nОт: ${callData.callerName}` : `Звонок от: ${callData.callerName}`;
     incomingAvatarImg.src = callData.callerPhoto;
-    
     openModal('incomingCallModal'); 
     
     unsubscribeIncoming = onSnapshot(doc(db, "calls", callId), (snapshot) => {
         const data = snapshot.data();
         if (!data || data.status === 'hungup' || (data.status === 'connected' && data.responderId !== currentUser.uid && data.callerId !== currentUser.uid)) {
-            stopSounds();
-            closeModal('incomingCallModal');
-            if (unsubscribeIncoming) unsubscribeIncoming();
-            if (data && data.status === 'hungup') showToast("Звонок отменен", "info");
-            else if (data) showToast("На звонок уже ответили", "info");
+            stopSounds(); closeModal('incomingCallModal'); if (unsubscribeIncoming) unsubscribeIncoming();
+            if (data && data.status === 'hungup') showToast("Звонок отменен", "info"); else if (data) showToast("На звонок уже ответили", "info");
         }
     });
     
     answerCallBtn.onclick = () => { if (unsubscribeIncoming) unsubscribeIncoming(); answerCall(callId, callData); closeModal('incomingCallModal'); };
-    rejectCallBtn.onclick = () => {
-        if (unsubscribeIncoming) unsubscribeIncoming(); stopSounds(); 
-        closeModal('incomingCallModal');
-        // Обновляем статус на сброшен
-        updateDoc(doc(db, "calls", callId), { status: 'hungup' });
-    };
+    rejectCallBtn.onclick = () => { if (unsubscribeIncoming) unsubscribeIncoming(); stopSounds(); closeModal('incomingCallModal'); updateDoc(doc(db, "calls", callId), { status: 'hungup' }); };
 }
 
 hangupBtn.onclick = endCall;
@@ -308,21 +190,14 @@ muteBtn.onclick = () => {
         const audioTrack = localStream.getAudioTracks()[0];
         audioTrack.enabled = !audioTrack.enabled;
         muteBtn.classList.toggle('active');
-        if (audioTrack.enabled) {
-            muteIcon.textContent = 'mic';
-            localAvatarWrapper.classList.remove('muted');
-        } else {
-            muteIcon.textContent = 'mic_off';
-            localAvatarWrapper.classList.add('muted');
-        }
+        if (audioTrack.enabled) { muteIcon.textContent = 'mic'; localAvatarWrapper.classList.remove('muted'); } 
+        else { muteIcon.textContent = 'mic_off'; localAvatarWrapper.classList.add('muted'); }
     }
 };
 
 let seconds = 0;
 function startTimer() {
-    callTimer.style.display = "block";
-    seconds = 0;
-    callTimer.textContent = "00:00";
+    callTimer.style.display = "block"; seconds = 0; callTimer.textContent = "00:00";
     timerInterval = setInterval(() => {
         seconds++;
         const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
@@ -331,7 +206,6 @@ function startTimer() {
     }, 1000);
 }
 
-// Визуализация голоса (мигание)
 function setupVoiceActivity(stream, wrapperElement) {
     const audioContext = new (window.AudioContext || window.webkitAudioContext)();
     const analyser = audioContext.createAnalyser();
@@ -345,6 +219,9 @@ function setupVoiceActivity(stream, wrapperElement) {
     analyser.connect(javascriptNode);
     javascriptNode.connect(audioContext.destination);
 
+    let isSpeaking = false;
+    let silenceTimer = null;
+
     javascriptNode.onaudioprocess = () => {
         const array = new Uint8Array(analyser.frequencyBinCount);
         analyser.getByteFrequencyData(array);
@@ -353,10 +230,22 @@ function setupVoiceActivity(stream, wrapperElement) {
         for (let i = 0; i < length; i++) { values += array[i]; }
         const average = values / length;
 
-        if (average > 10) { // Порог чувствительности
-            wrapperElement.classList.add('speaking');
+        if (average > 15) { 
+            if (!isSpeaking) {
+                isSpeaking = true;
+                wrapperElement.classList.add('speaking');
+                if(silenceTimer) clearTimeout(silenceTimer);
+            }
         } else {
-            wrapperElement.classList.remove('speaking');
+            if (isSpeaking) {
+                if(!silenceTimer) {
+                    silenceTimer = setTimeout(() => {
+                        wrapperElement.classList.remove('speaking');
+                        isSpeaking = false;
+                        silenceTimer = null;
+                    }, 300); 
+                }
+            }
         }
     };
 }

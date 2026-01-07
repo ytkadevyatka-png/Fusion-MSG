@@ -8,6 +8,7 @@ export function showToast(message, type = 'info', duration = 4000) {
     let iconName = 'info';
     if (type === 'success') iconName = 'check_circle';
     if (type === 'error') iconName = 'error';
+    if (type === 'info') iconName = 'info';
 
     toast.innerHTML = `
         <span class="material-symbols-outlined toast-icon">${iconName}</span>
@@ -43,16 +44,13 @@ export function closeModal(modalId) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+    // Закрытие только по кнопкам с классом close-btn и close-icon-btn
     document.querySelectorAll('.close-btn, .close-icon-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const modal = this.closest('.modal');
-            if (modal) closeModal(modal.id);
+            if (modal) {
+                closeModal(modal.id);
+            }
         });
-    });
-
-    window.addEventListener('click', (e) => {
-        if (e.target.classList.contains('modal')) {
-            closeModal(e.target.id);
-        }
     });
 });
