@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fusion Chat</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0" />
+</head>
+<body>
+
+    <div id="toast-container"></div>
+
+    <audio id="soundRingtone" loop src="https://assets.mixkit.co/active_storage/sfx/2354/2354-preview.mp3"></audio>
+    <audio id="soundConnecting" loop src="https://assets.mixkit.co/active_storage/sfx/1359/1359-preview.mp3"></audio>
+
+    <div class="app-layout">
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>Fusion</h2>
+                <button id="settingsBtn" class="icon-btn" title="Настройки"><span class="material-symbols-outlined">settings</span></button>
+            </div>
+
+            <div class="sidebar-menu">
+                <button id="friendsBtn" class="menu-btn relative-btn">
+                    <span class="material-symbols-outlined">group</span>
+                    <span>Люди и заявки</span>
+                    <div id="sidebarRequestsBadge" class="notification-badge" style="display: none;"></div>
+                </button>
+                <button id="createGroupBtn" class="menu-btn">
+                    <span class="material-symbols-outlined">add_circle</span>
+                    <span>Новая группа</span>
+                </button>
+            </div>
+            
+            <div id="chatsList" class="chats-list">
+                <div class="loading-text">Загрузка...</div>
+            </div>
+
+            <div class="sidebar-bottom-wrapper">
+                <div id="activityStatusBar" class="activity-status-bar">
+                    <span class="material-symbols-outlined icon-tiny">radio_button_checked</span>
+                    <span id="activityStatusText">В меню</span>
+                </div>
+                
+                <div id="sidebarUserProfile" class="user-mini-profile clickable-profile">
+                    <img id="miniProfileAvatar" src="" alt="A">
+                    <div class="mini-profile-info">
+                        <div id="miniProfileName" class="mini-name">...</div>
+                        <div id="miniProfileStatus" class="mini-status">...</div>
+                    </div>
+                    <button id="globalMuteBtn" class="icon-btn tiny-btn" title="Микрофон"><span class="material-symbols-outlined" id="globalMuteIcon">mic</span></button>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div id="emptyState" class="empty-state">
+                <div class="empty-content">
+                    <h3>Выберите чат ✨</h3>
+                    <p>Находите друзей в меню слева</p>
+                </div>
+            </div>
+
+            <div id="chatRoom" class="chat-room" style="display: none;">
+                <header class="chat-header">
+                    <div class="header-user-info" id="chatHeaderInfoArea" style="cursor: pointer;"> 
+                        <div id="chatHeaderAvatar" class="header-avatar"></div> 
+                        <div>
+                            <span id="chatTitle" class="chat-title-name">Имя</span>
+                            <div id="chatHeaderStatus" class="header-status-text"></div>
+                        </div>
+                    </div>
+                    <button id="startCallBtn" class="icon-btn" title="Позвонить">
+                        <span class="material-symbols-outlined">call</span>
+                    </button>
+                </header>
+
+                <div id="callInterface" class="call-embedded" style="display: none;">
+                    <div class="call-content-wrapper">
+                        <div class="call-avatars-row">
+                            <div class="avatar-wrapper-call local" id="localAvatarWrapper">
+                                <img id="localCallAvatar" src="" alt="Я">
+                                <div class="mic-badge"><span class="material-symbols-outlined">mic_off</span></div>
+                                <span class="avatar-label">Вы</span>
+                            </div>
+                            <div class="avatar-wrapper-call remote" id="remoteAvatarWrapper">
+                                <div class="pulse-ring"></div>
+                                <div class="pulse-ring delay"></div>
+                                <img id="remoteCallAvatar" src="" alt="Собеседник">
+                                <div class="mic-badge"><span class="material-symbols-outlined">mic_off</span></div>
+                                <span id="remoteAvatarLabel" class="avatar-label">Собеседник</span>
+                            </div>
+                        </div>
+                        <div id="callStatusText" class="call-status-text">Соединение...</div>
+                        <div id="callTimer" class="call-timer" style="display: none;">00:00</div>
+                        <audio id="remoteAudio" autoplay></audio>
+                        <div class="call-controls">
+                            <button id="muteBtn" class="call-btn btn-mute"><span class="material-symbols-outlined" id="muteIcon">mic</span></button>
+                            <button id="hangupBtn" class="call-btn btn-hangup"><span class="material-symbols-outlined">call_end</span></button>
+                        </div>
+                    </div>
+                    <div id="resizeHandle" class="resize-handle"><div class="handle-bar"></div></div>
+                </div>
+                
+                <div id="messagesList" class="messages-list"></div>
+                
+                <div class="input-area">
+                    <div class="input-wrapper">
+                        <input type="text" id="messageInput" placeholder="Напишите сообщение..." autocomplete="off">
+                        <button id="sendBtn" class="send-btn"><span class="material-symbols-outlined">send</span></button>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="currentUserProfileModal" class="modal">
+        <div class="glass-panel profile-card-container">
+            <span id="closeUserProfile" class="close-btn">&times;</span>
+            <div class="profile-card-header">
+                <img id="fullProfileAvatar" src="" alt="Avatar">
+            </div>
+            <div class="profile-card-body">
+                <h2 id="fullProfileName">Name</h2>
+                <p id="fullProfileUsername" style="color:var(--primary-color); margin-bottom:5px; font-weight:bold;">@username</p>
+                <p id="fullProfileEmail" class="profile-email">email</p>
+                <div class="profile-stat-badge">
+                    <span id="fullProfileStatusIndicator" class="status-indicator"></span>
+                    <span id="fullProfileStatusText">...</span>
+                </div>
+                <div class="profile-id-box">ID: <span id="fullProfileId" class="code-text">...</span></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="friendsModal" class="modal">
+        <div class="glass-panel split-modal-layout">
+            <span id="closeFriends" class="close-btn">&times;</span>
+            
+            <div class="split-sidebar">
+                <div class="modal-nav-item active" data-target="ftab-my-friends">
+                    <span class="material-symbols-outlined">person</span> Мои друзья
+                </div>
+                <div class="modal-nav-item" data-target="ftab-search">
+                    <span class="material-symbols-outlined">search</span> Поиск
+                </div>
+                <div class="modal-nav-item" data-target="ftab-requests">
+                    <span class="material-symbols-outlined">notifications</span> Заявки 
+                    <div id="modalRequestsBadge" class="notification-badge-small" style="display:none;">0</div>
+                </div>
+            </div>
+
+            <div class="split-content">
+                <div id="ftab-my-friends" class="tab-pane active">
+                    <h3 class="modal-title">Мои друзья</h3>
+                    <div id="myFriendsList" class="friends-grid"></div>
+                </div>
+                <div id="ftab-search" class="tab-pane">
+                    <h3 class="modal-title">Поиск людей</h3>
+                    <div class="search-box">
+                        <input type="text" id="userSearchInput" class="settings-input" placeholder="Имя или @username...">
+                        <button id="userSearchBtn" class="primary-btn" style="width: auto;">Найти</button>
+                    </div>
+                    <div id="searchResultsList" class="friends-grid"></div>
+                </div>
+                <div id="ftab-requests" class="tab-pane">
+                    <h3 class="modal-title">Входящие заявки</h3>
+                    <div id="friendRequestsList" class="requests-list"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="settingsModal" class="modal">
+        <div class="glass-panel split-modal-layout">
+            <span id="closeSettings" class="close-btn">&times;</span>
+            
+            <div class="split-sidebar">
+                <div class="modal-nav-item active" data-target="tab-profile">
+                    <span class="material-symbols-outlined">person</span> Профиль
+                </div>
+                <div class="modal-nav-item" data-target="tab-status">
+                    <span class="material-symbols-outlined">toggle_on</span> Статус
+                </div>
+                <div class="modal-nav-item" data-target="tab-appearance">
+                    <span class="material-symbols-outlined">palette</span> Оформление
+                </div>
+                <div class="modal-nav-item" data-target="tab-account">
+                    <span class="material-symbols-outlined">logout</span> Аккаунт
+                </div>
+            </div>
+
+            <div class="split-content">
+                <div id="tab-profile" class="tab-pane active">
+                    <h3 class="modal-title">Мой профиль</h3>
+                    <div id="settingsProfileInfo" class="profile-large"></div>
+                </div>
+                
+                <div id="tab-status" class="tab-pane">
+                    <h3 class="modal-title">Статус активности</h3>
+                    <select id="statusSelect" class="settings-input">
+                        <option value="online">🟢 В сети</option>
+                        <option value="busy">🔴 Не беспокоить</option>
+                        <option value="offline">⚪ Невидимка</option>
+                    </select>
+                    <input type="text" id="customStatusInput" class="settings-input" placeholder="Ваш статус..." maxlength="30">
+                    <button id="saveSettingsBtn" class="primary-btn">Сохранить</button>
+                </div>
+                
+                <div id="tab-appearance" class="tab-pane">
+                    <h3 class="modal-title">Внешний вид</h3>
+                    
+                    <label style="font-size:12px; font-weight:600; color:var(--text-sub); display:block; margin-bottom:5px;">ЭФФЕКТ ФОНА</label>
+                    <select id="bgAnimSelect" class="settings-input" style="margin-bottom: 20px;">
+                        <option value="bg-static">Статичный</option>
+                        <optgroup label="Плавные потоки">
+                            <option value="bg-flow">Поток (Стандарт)</option>
+                            <option value="bg-ocean">Океан</option>
+                            <option value="bg-pulse">Пульсация</option>
+                        </optgroup>
+                    </select>
+
+                    <div class="theme-group-title">Стандартные</div>
+                    <div class="themes-grid">
+                        <div class="theme-card" data-theme="pure-white"><div class="theme-preview" style="background: #ffffff; border:1px solid #ddd;"></div><span>White</span></div>
+                        <div class="theme-card" data-theme="classic-gray"><div class="theme-preview" style="background: #e0e0e0;"></div><span>Gray</span></div>
+                        <div class="theme-card" data-theme="pitch-black"><div class="theme-preview" style="background: #000000;"></div><span>AMOLED</span></div>
+                    </div>
+
+                    <div class="theme-group-title">Светлые</div>
+                    <div class="themes-grid">
+                        <div class="theme-card active" data-theme="default"><div class="theme-preview" style="background: linear-gradient(135deg, #ee7752, #23d5ab);"></div><span>Aurora</span></div>
+                        <div class="theme-card" data-theme="sunset"><div class="theme-preview" style="background: linear-gradient(135deg, #ff9966, #ff5e62);"></div><span>Sunset</span></div>
+                        <div class="theme-card" data-theme="forest"><div class="theme-preview" style="background: linear-gradient(135deg, #134e5e, #71b280);"></div><span>Forest</span></div>
+                        <div class="theme-card" data-theme="cherry"><div class="theme-preview" style="background: linear-gradient(135deg, #fbc2eb, #a6c1ee);"></div><span>Cherry</span></div>
+                        <div class="theme-card" data-theme="lavender"><div class="theme-preview" style="background: #e6e6fa;"></div><span>Lavender</span></div>
+                        <div class="theme-card" data-theme="mint"><div class="theme-preview" style="background: linear-gradient(135deg, #00cdac, #8ddad5);"></div><span>Mint</span></div>
+                        <div class="theme-card" data-theme="sky"><div class="theme-preview" style="background: linear-gradient(135deg, #a18cd1, #fbc2eb);"></div><span>Sky</span></div>
+                        <div class="theme-card" data-theme="peach"><div class="theme-preview" style="background: #eddcd9;"></div><span>Peach</span></div>
+                        <div class="theme-card" data-theme="cream"><div class="theme-preview" style="background: #fdfcf0;"></div><span>Cream</span></div>
+                        <div class="theme-card" data-theme="rose-gold"><div class="theme-preview" style="background: linear-gradient(135deg, #eecda3, #ef629f);"></div><span>Rose</span></div>
+                    </div>
+
+                    <div class="theme-group-title">Темные</div>
+                    <div class="themes-grid">
+                        <div class="theme-card" data-theme="standard-dark"><div class="theme-preview" style="background: #202225;"></div><span>Dark</span></div>
+                        <div class="theme-card" data-theme="midnight"><div class="theme-preview" style="background: linear-gradient(135deg, #0f2027, #2c5364);"></div><span>Midnight</span></div>
+                        <div class="theme-card" data-theme="cyberpunk"><div class="theme-preview" style="background: linear-gradient(135deg, #000, #ff0055);"></div><span>Cyber</span></div>
+                        <div class="theme-card" data-theme="graphite"><div class="theme-preview" style="background: linear-gradient(135deg, #232526, #414345);"></div><span>Graphite</span></div>
+                        <div class="theme-card" data-theme="ocean-depth"><div class="theme-preview" style="background: linear-gradient(135deg, #0f2027, #203a43, #2c5364);"></div><span>Ocean</span></div>
+                        <div class="theme-card" data-theme="toxic"><div class="theme-preview" style="background: linear-gradient(135deg, #1d2b64, #f8cdda);"></div><span>Toxic</span></div>
+                        <div class="theme-card" data-theme="purple-haze"><div class="theme-preview" style="background: linear-gradient(135deg, #240b36, #c31432);"></div><span>Purple</span></div>
+                        <div class="theme-card" data-theme="neon-blue"><div class="theme-preview" style="background: linear-gradient(135deg, #000428, #004e92);"></div><span>Neon</span></div>
+                        <div class="theme-card" data-theme="dracula"><div class="theme-preview" style="background: #282a36;"></div><span>Drac</span></div>
+                        <div class="theme-card" data-theme="nord"><div class="theme-preview" style="background: #2e3440;"></div><span>Nord</span></div>
+                    </div>
+                </div>
+                
+                <div id="tab-account" class="tab-pane">
+                    <h3 class="modal-title">Аккаунт</h3>
+                    <button id="logoutBtn" class="secondary-btn" style="width:100%; margin-bottom: 20px;">Выйти из аккаунта</button>
+                    <div style="border-top: 1px solid rgba(255,0,0,0.2); padding-top: 15px;">
+                        <p style="font-size: 12px; color: #ff4444; margin-bottom: 10px; font-weight: bold;">ОПАСНАЯ ЗОНА</p>
+                        <button id="deleteAccountBtn" class="danger-btn">Удалить аккаунт навсегда</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="createGroupModal" class="modal"><div class="glass-panel group-creation-container"><div class="group-modal-header"><h2>Новая группа</h2><span id="closeCreateGroup" class="close-icon-btn"><span class="material-symbols-outlined">close</span></span></div><div class="group-input-area"><div class="group-avatar-placeholder"><span class="material-symbols-outlined">groups</span></div><input type="text" id="newGroupName" class="group-name-input" placeholder="Название..." autocomplete="off"></div><div class="group-members-label">Участники</div><div id="usersForGroupList" class="users-grid-selector"></div><div class="group-modal-footer"><button id="confirmCreateGroupBtn" class="primary-btn create-btn"><span class="material-symbols-outlined">check</span> Создать</button></div></div></div>
+    <div id="groupInfoModal" class="modal"><div class="glass-panel" style="width: 350px; text-align: center; padding: 20px;"><span id="closeGroupInfo" class="close-btn">&times;</span><div class="group-avatar-placeholder" style="margin: 0 auto 15px; width: 80px; height: 80px;"><span class="material-symbols-outlined" style="font-size: 40px;">groups</span></div><h2 id="infoGroupName" style="margin-bottom: 5px;">...</h2><p id="infoGroupCount" style="color: var(--text-sub); font-size: 14px; margin-bottom: 25px;">...</p><div id="groupCreatorActions" style="display: none;"><p style="font-size: 12px; color: #ff4444; margin-bottom: 10px;">Вы создатель</p><button id="deleteGroupBtn" class="danger-btn">Удалить группу</button></div><div id="groupMemberActions" style="display: none;"><div style="margin-bottom: 15px; text-align: left; padding: 10px; background: rgba(0,0,0,0.05); border-radius: 8px;"><label style="display: flex; align-items: center; gap: 10px; cursor: pointer;"><input type="checkbox" id="notifyLeaveCheck"><span style="font-size: 14px;">Уведомить</span></label></div><button id="leaveGroupBtn" class="danger-btn" style="background: #ff9800;">Покинуть группу</button></div></div></div>
+    <div id="customConfirmModal" class="modal"><div class="glass-panel" style="width: 320px; text-align: center; padding: 30px;"><div style="margin-bottom: 15px; color: var(--primary-color);"><span class="material-symbols-outlined" style="font-size: 40px;">help</span></div><h3 style="margin-bottom: 10px;">Подтверждение</h3><p id="confirmMessage" style="color: var(--text-sub); margin-bottom: 25px; font-size: 14px; line-height: 1.4;">...</p><div class="confirm-actions"><button id="confirmCancelBtn" class="secondary-btn">Отмена</button><button id="confirmOkBtn" class="primary-btn">Да</button></div></div></div>
+
+    <div id="authModal" class="modal" style="display: none;">
+        <div id="loginForm" class="glass-panel auth-container">
+            <h2>Вход</h2><input type="email" id="loginEmail" class="settings-input" placeholder="Email"><input type="password" id="loginPassword" class="settings-input" placeholder="Пароль"><div class="code-section"><button id="loginSendCodeBtn" class="secondary-btn">Код</button><input type="text" id="loginCodeInput" class="settings-input" placeholder="Код" style="width: 80px;"></div><div id="loginTimer" style="color:red; font-size:12px; height:15px;"></div><button id="loginBtn" class="primary-btn">Войти</button><div class="divider">или</div><button id="googleLoginBtn" class="google-btn"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"> Google</button><p style="text-align:center; margin-top:10px;"><a href="#" id="toRegisterLink">Регистрация</a></p>
+        </div>
+        <div id="registerChoice" class="glass-panel auth-container" style="display: none;"><h2>Регистрация</h2><button id="googleRegBtn" class="google-btn"><img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg"> Google</button><button id="toEmailRegBtn" class="primary-btn">Email</button><p style="text-align:center; margin-top:10px;"><a href="#" id="backToLoginFromChoice">Назад</a></p></div>
+        <div id="registerEmailForm" class="glass-panel auth-container" style="display: none;"><h2>Новый аккаунт</h2><input type="text" id="regUsername" class="settings-input" placeholder="@username"><input type="email" id="regEmail" class="settings-input" placeholder="Email"><input type="password" id="regPassword" class="settings-input" placeholder="Пароль"><input type="password" id="regPasswordConfirm" class="settings-input" placeholder="Повтор"><div class="code-section"><button id="regSendCodeBtn" class="secondary-btn">Код</button><input type="text" id="regCodeInput" class="settings-input" placeholder="Код" style="width: 80px;"></div><div id="regTimer" style="color:red; font-size:12px; height:15px;"></div><button id="regBtn" class="primary-btn">Создать</button><p style="text-align:center; margin-top:10px;"><a href="#" id="backToChoice">Назад</a></p></div>
+    </div>
+    
+    <div id="incomingCallModal" class="modal"><div class="glass-panel" style="text-align: center; width: 300px; padding: 30px;"><div class="incoming-avatar"><img id="incomingAvatarImg" src="https://cdn-icons-png.flaticon.com/512/847/847969.png"></div><h3 id="incomingCallerName">Входящий звонок</h3><p style="color: var(--text-sub); margin-bottom: 25px;">Голосовой вызов</p><div style="display: flex; gap: 30px; justify-content: center;"><button id="answerCallBtn" class="call-btn btn-answer"><span class="material-symbols-outlined">call</span></button><button id="rejectCallBtn" class="call-btn btn-hangup"><span class="material-symbols-outlined">call_end</span></button></div></div></div>
+
+    <script type="module" src="./js/firebase-config.js"></script>
+    <script type="module" src="./js/toast.js"></script>
+    <script type="module" src="./js/auth.js"></script>
+    <script type="module" src="./js/chat.js"></script>
+    <script type="module" src="./js/call.js"></script>
+</body>
+</html>
