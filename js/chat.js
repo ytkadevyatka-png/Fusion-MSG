@@ -23,6 +23,7 @@ const chatHeaderAvatar = document.getElementById('chatHeaderAvatar');
 const chatHeaderStatus = document.getElementById('chatHeaderStatus');
 const startCallBtn = document.getElementById('startCallBtn');
 const chatHeaderInfoArea = document.getElementById('chatHeaderInfoArea');
+const backToChatsBtn = document.getElementById('backToChatsBtn'); // [НОВОЕ]
 
 const createGroupBtn = document.getElementById('createGroupBtn');
 const confirmCreateGroupBtn = document.getElementById('confirmCreateGroupBtn');
@@ -70,6 +71,15 @@ const closeUserProfile = document.getElementById('closeUserProfile');
 let myFriendsData = [];
 let allGroupsData = [];
 let friendListenersUnsubscribers = [];
+
+// [НОВОЕ] Логика кнопки "Назад" для мобильных
+if (backToChatsBtn) {
+    backToChatsBtn.addEventListener('click', () => {
+        document.body.classList.remove('mobile-chat-open'); // Убираем класс, показываем список
+        currentChatId = null;
+        // Можно также сбросить выделение в списке, если нужно
+    });
+}
 
 function setupFriendListeners(friendUids) {
     friendListenersUnsubscribers.forEach(unsub => unsub());
@@ -170,7 +180,6 @@ export function initChat() {
         const qGroups = query(collection(db, "groups"), where("members", "array-contains", user.uid));
         onSnapshot(qGroups, (snapshot) => { allGroupsData = []; snapshot.forEach(doc => allGroupsData.push({ id: doc.id, ...doc.data() })); renderChatList(); });
         
-        // Слушатель заявок в друзья
         const qRequests = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "pending"));
         onSnapshot(qRequests, (snapshot) => {
             const count = snapshot.docs.length;
@@ -225,10 +234,10 @@ function renderChatList() {
     }
 }
 
-// Сброс UI чата (когда юзер удалился)
 function resetChatUI() {
     chatRoom.style.display = 'none';
     emptyState.style.display = 'flex';
+    document.body.classList.remove('mobile-chat-open'); // [НОВОЕ] Сброс мобильного вида
     currentChatId = null;
     currentChatUser = null;
     currentChatGroup = null;
@@ -247,6 +256,9 @@ function openChat(target, type) {
     if(startCallBtn) startCallBtn.style.display = 'flex';
     updateUserActivity(`В чате: ${type === 'direct' ? target.displayName : target.name}`);
     
+    // [НОВОЕ] Переключаем вид на мобильных
+    document.body.classList.add('mobile-chat-open');
+
     if (type === 'direct') {
         currentChatUser = target; currentChatGroup = null; const ids = [auth.currentUser.uid, target.uid].sort(); currentChatId = ids[0] + "_" + ids[1];
         updateChatHeader(target.displayName, target.photoURL, target.status);
@@ -331,53 +343,29 @@ userSearchBtn.addEventListener('click', async () => {
     const snapshot = await getDocs(q);
     searchResultsList.innerHTML = '';
     if (snapshot.empty) { searchResultsList.innerHTML = '<div style="padding:10px;">Никого не найдено</div>'; return; }
-    
     snapshot.forEach(docSnap => {
-        // [ИСПРАВЛЕНИЕ] Гарантированно получаем UID из ID документа
         const userData = docSnap.data();
         const user = { ...userData, uid: docSnap.id }; 
         
         if (user.uid === auth.currentUser.uid) return;
-        
         const isFriend = myFriendsData.some(f => f.uid === user.uid);
-        
         const card = document.createElement('div'); card.className = 'friend-card';
         card.innerHTML = `<img src="${user.photoURL}"><div class="friend-name">${user.displayName} <span style='font-size:11px;color:#888'>@${user.username||''}</span></div>${!isFriend ? `<button class="btn-add-friend" data-uid="${user.uid}">Добавить</button>` : '<span style="font-size:12px;color:green;">Друзья</span>'}`;
-        
-        if (!isFriend) {
-            card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
-        }
+        if (!isFriend) card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
         searchResultsList.appendChild(card);
     });
 });
 
 async function sendFriendRequest(targetUser) {
     if (!targetUser || !targetUser.uid) return showToast("Ошибка: пользователь не найден", "error");
-
     try { 
-        // Проверяем, не отправляли ли уже
-        const checkQ = query(collection(db, "friend_requests"), 
-            where("from", "==", auth.currentUser.uid), 
-            where("to", "==", targetUser.uid));
-        
+        const checkQ = query(collection(db, "friend_requests"), where("from", "==", auth.currentUser.uid), where("to", "==", targetUser.uid));
         const checkSnap = await getDocs(checkQ);
-        if (!checkSnap.empty) {
-            return showToast("Заявка уже отправлена", "info");
-        }
+        if (!checkSnap.empty) { return showToast("Заявка уже отправлена", "info"); }
 
-        await addDoc(collection(db, "friend_requests"), { 
-            from: auth.currentUser.uid, 
-            to: targetUser.uid, 
-            fromName: auth.currentUser.displayName, 
-            fromPhoto: auth.currentUser.photoURL, 
-            status: 'pending', 
-            timestamp: serverTimestamp() 
-        }); 
+        await addDoc(collection(db, "friend_requests"), { from: auth.currentUser.uid, to: targetUser.uid, fromName: auth.currentUser.displayName, fromPhoto: auth.currentUser.photoURL, status: 'pending', timestamp: serverTimestamp() }); 
         showToast("Заявка отправлена", "success"); 
-    } catch (e) { 
-        console.error(e);
-        showToast("Ошибка: " + e.message, "error"); 
-    }
+    } catch (e) { console.error(e); showToast("Ошибка: " + e.message, "error"); }
 }
 
 function renderFriendRequests(docs) {
