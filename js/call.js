@@ -22,6 +22,9 @@ let unsubscribes = [];
 let callTimerInterval = null;
 let candidatesQueue = []; 
 
+// Wake Lock (Блокировка сна экрана)
+let wakeLock = null;
+
 // Время и ID чата
 let connectionStartTime = null;
 let activeChatId = null;
@@ -97,6 +100,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
         setupAudioAnalysis(localStream, 'local'); 
+        requestWakeLock(); // [MOBILE] Блокируем сон
     } catch (e) {
         handleMediaError(e);
         return;
@@ -185,6 +189,7 @@ async function acceptCall(id) {
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
         setupAudioAnalysis(localStream, 'local');
+        requestWakeLock(); // [MOBILE] Блокируем сон
     } catch (e) {
         handleMediaError(e);
         return;
@@ -316,6 +321,25 @@ function visualizeVoice() {
     voiceLoop = requestAnimationFrame(visualizeVoice);
 }
 
+// === WAKE LOCK (MOBILE) ===
+async function requestWakeLock() {
+    try {
+        if ('wakeLock' in navigator) {
+            wakeLock = await navigator.wakeLock.request('screen');
+            console.log('Wake Lock активен');
+        }
+    } catch (err) {
+        console.warn('Wake Lock error:', err);
+    }
+}
+
+function releaseWakeLock() {
+    if (wakeLock) {
+        wakeLock.release()
+            .then(() => { wakeLock = null; console.log('Wake Lock снят'); });
+    }
+}
+
 // === UI & ACTIONS ===
 toggleMicBtn.addEventListener('click', async () => {
     if (!localStream) return;
@@ -411,11 +435,10 @@ function resetCallState() {
     localVoiceIndicator.classList.remove('speaking');
     remoteVoiceIndicator.classList.remove('speaking');
     
-    if (voiceLoop) {
-        cancelAnimationFrame(voiceLoop);
-        voiceLoop = null; // [ИСПРАВЛЕНИЕ] Обнуляем ID анимации
-    }
+    if (voiceLoop) { cancelAnimationFrame(voiceLoop); voiceLoop = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
+    
+    releaseWakeLock(); // Снятие блокировки сна
 }
 
 hangupBtn.addEventListener('click', async () => {
@@ -424,7 +447,6 @@ hangupBtn.addEventListener('click', async () => {
     endCallLocally();
 });
 
-// Отправка сообщения о завершении
 async function sendCallEndMessage() {
     if (!activeChatId || !auth.currentUser) return;
 
@@ -437,7 +459,6 @@ async function sendCallEndMessage() {
         durationText = `${m}:${s}`;
     }
 
-    // [НОВОЕ] Форматирование времени окончания
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 

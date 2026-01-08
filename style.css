@@ -548,3 +548,54 @@ body.bg-pulse { animation: animPulse 8s ease-in-out infinite; background-size: 1
 .control-btn.active { background: #fff; color: #000; } 
 .btn-hangup { background: #ff4444 !important; } .btn-hangup:hover { background: #d32f2f !important; }
 .btn-answer { background: #00b34a !important; } .btn-answer:hover { background: #008f39 !important; }
+
+/* === МОБИЛЬНАЯ АДАПТАЦИЯ ЗВОНКОВ === */
+@media (max-width: 480px) {
+    /* На мобильных окно звонка на весь экран */
+    .call-panel {
+        width: 100%;
+        height: 100dvh; /* Dynamic viewport height для учета адресной строки */
+        max-height: none;
+        border-radius: 0;
+        border: none;
+        background: #121212; /* Глубокий черный для OLED экранов */
+        padding-top: 60px; /* Отступ сверху для статус-бара */
+        padding-bottom: 40px;
+    }
+
+    .call-stage {
+        gap: 30px; /* Чуть меньше отступ между аватарами */
+    }
+
+    /* Аватар собеседника чуть больше */
+    .remote-user .avatar-container {
+        width: 130px;
+        height: 130px;
+    }
+
+    /* Мой аватар чуть меньше и ниже */
+    .local-user .avatar-container {
+        width: 80px;
+        height: 80px;
+    }
+    
+    .call-username {
+        font-size: 16px;
+    }
+
+    .call-controls, .incoming-controls {
+        gap: 40px; /* Кнопки пошире друг от друга */
+        margin-bottom: 40px;
+    }
+
+    .control-btn {
+        width: 70px;
+        height: 70px; /* Кнопки побольше для пальцев */
+    }
+    
+    /* Скрываем пульсацию за пределами экрана */
+    .ringing-pulse {
+        width: 100%;
+        height: 100%;
+    }
+}
