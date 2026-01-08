@@ -44,7 +44,6 @@ export function closeModal(modalId) {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
-    // Закрытие только по кнопкам с классом close-btn и close-icon-btn
     document.querySelectorAll('.close-btn, .close-icon-btn').forEach(btn => {
         btn.addEventListener('click', function() {
             const modal = this.closest('.modal');

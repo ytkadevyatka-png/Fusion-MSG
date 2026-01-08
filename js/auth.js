@@ -1,5 +1,5 @@
 import { auth, provider, db } from "./firebase-config.js";
-import { signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { signInWithPopup, onAuthStateChanged, signOut, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile, deleteUser } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 import { doc, setDoc, updateDoc, serverTimestamp, getDocs, getDoc, query, collection, where, deleteDoc, arrayRemove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { showToast, openModal, closeModal } from "./toast.js";
 
@@ -52,22 +52,32 @@ let currentUserUid = null;
 let currentSelectedTheme = localStorage.getItem('fusion-theme') || 'default';
 let currentSelectedBg = localStorage.getItem('fusion-bg-pattern') || 'bg-flow';
 
-// Статус
+// === ЛОГИКА СТАТУСА (Сворачивание) ===
 document.addEventListener("visibilitychange", () => {
     if (!currentUserUid) return;
     const newStatus = document.visibilityState === 'visible' ? 'online' : 'busy';
     updateDoc(doc(db, "users", currentUserUid), { status: newStatus }).catch(console.error);
 });
 
-// Инициализация темы
+// === ИНИЦИАЛИЗАЦИЯ ТЕМЫ ===
 applyTheme(currentSelectedTheme);
 applyBgPattern(currentSelectedBg);
 
+// [ИЗМЕНЕНО] Авто-сохранение фона при выборе
 if(bgAnimSelect) {
     bgAnimSelect.value = currentSelectedBg;
     bgAnimSelect.addEventListener('change', () => { 
-        currentSelectedBg = bgAnimSelect.value;
-        applyBgPattern(currentSelectedBg); 
+        const newPattern = bgAnimSelect.value;
+        currentSelectedBg = newPattern;
+        applyBgPattern(newPattern); 
+        
+        // 1. Мгновенно в localStorage
+        localStorage.setItem('fusion-bg-pattern', newPattern);
+        
+        // 2. Мгновенно в БД (если вошли)
+        if (currentUserUid) {
+            updateDoc(doc(db, "users", currentUserUid), { bgPattern: newPattern }).catch(console.error);
+        }
     }); 
 }
 
@@ -80,33 +90,49 @@ function applyTheme(themeName) {
     if (themeName === 'default' || !themeName) document.body.removeAttribute('data-theme'); 
     else document.body.setAttribute('data-theme', themeName); 
     
-    // Обновляем визуально карточки
-    const cards = document.querySelectorAll('.theme-card');
-    if (cards.length > 0) {
-        cards.forEach(c => { 
-            c.classList.remove('active'); 
-            if(c.getAttribute('data-theme') === themeName) c.classList.add('active'); 
-        }); 
-    }
+    document.querySelectorAll('.theme-card').forEach(c => { 
+        c.classList.remove('active'); 
+        if(c.getAttribute('data-theme') === themeName) c.classList.add('active'); 
+    }); 
 }
 
+// [ИЗМЕНЕНО] Авто-сохранение темы при клике
 document.querySelectorAll('.theme-card').forEach(card => { 
     card.addEventListener('click', () => { 
         const theme = card.getAttribute('data-theme'); 
         currentSelectedTheme = theme; 
         applyTheme(theme); 
+        
+        // 1. Мгновенно в localStorage (чтобы при F5 не слетало)
+        localStorage.setItem('fusion-theme', theme);
+        
+        // 2. Мгновенно в БД (чтобы на другом ПК было так же)
+        if (currentUserUid) {
+            updateDoc(doc(db, "users", currentUserUid), { theme: theme }).catch(console.error);
+        }
     }); 
 });
 
+// [ИЗМЕНЕНО] Усиленная функция сброса
 function resetVisualSettings() { 
+    // 1. Удаляем из памяти браузера
     localStorage.removeItem('fusion-theme');
     localStorage.removeItem('fusion-bg-pattern');
+    
+    // 2. Сбрасываем переменные
+    currentSelectedTheme = 'default';
+    currentSelectedBg = 'bg-flow';
+
+    // 3. Применяем дефолт
     applyTheme('default'); 
     applyBgPattern('bg-flow'); 
+    
+    // 4. Сбрасываем UI
     if(bgAnimSelect) bgAnimSelect.value = 'bg-flow'; 
+    console.log("Visual settings reset to default");
 }
 
-// --- TAB SWITCHING LOGIC ---
+// === ПЕРЕКЛЮЧЕНИЕ ВКЛАДОК ===
 document.addEventListener('click', (e) => {
     const tabBtn = e.target.closest('.modal-nav-item');
     if (!tabBtn) return;
@@ -128,7 +154,7 @@ document.addEventListener('click', (e) => {
     }
 });
 
-// --- UI LISTENERS ---
+// === UI СЛУШАТЕЛИ ===
 if(settingsBtn) settingsBtn.addEventListener('click', () => openModal('settingsModal'));
 if(closeSettings) closeSettings.addEventListener('click', () => closeModal('settingsModal'));
 if(toRegisterLink) toRegisterLink.addEventListener('click', (e) => { e.preventDefault(); loginForm.style.display = 'none'; registerChoice.style.display = 'flex'; });
@@ -143,7 +169,7 @@ function showAuthConfirm(msg) {
         const noBtn = document.getElementById('confirmCancelBtn');
         text.textContent = msg;
         openModal('customConfirmModal');
-        // Очищаем старые слушатели перед добавлением новых
+        
         const newYesBtn = yesBtn.cloneNode(true);
         const newNoBtn = noBtn.cloneNode(true);
         yesBtn.parentNode.replaceChild(newYesBtn, yesBtn);
@@ -154,6 +180,7 @@ function showAuthConfirm(msg) {
     });
 }
 
+// Код подтверждения (симуляция)
 function sendCodeSimulate(type, btnId, inputId, timerId) { 
     const btn = document.getElementById(btnId); const input = document.getElementById(inputId); const timerDisplay = document.getElementById(timerId); 
     const code = Math.floor(100000 + Math.random() * 900000).toString(); 
@@ -165,6 +192,7 @@ function sendCodeSimulate(type, btnId, inputId, timerId) {
 if(document.getElementById('loginSendCodeBtn')) { document.getElementById('loginSendCodeBtn').addEventListener('click', () => { if(!document.getElementById('loginEmail').value) return showToast("Введите Email", "error"); sendCodeSimulate('login', 'loginSendCodeBtn', 'loginCodeInput', 'loginTimer'); }); }
 if(document.getElementById('regSendCodeBtn')) { document.getElementById('regSendCodeBtn').addEventListener('click', () => { if(!document.getElementById('regEmail').value) return showToast("Введите Email", "error"); sendCodeSimulate('register', 'regSendCodeBtn', 'regCodeInput', 'regTimer'); }); }
 
+// === АВТОРИЗАЦИЯ ===
 const loginBtn = document.getElementById('loginBtn');
 if(loginBtn) { 
     loginBtn.addEventListener('click', async () => { 
@@ -187,7 +215,9 @@ if(regBtn) {
         if (code !== generatedRegCode) return showToast("Неверный код", "error");
 
         try {
+            // Создаем пользователя без username
             const cred = await createUserWithEmailAndPassword(auth, email, pass);
+            // Сохраняем в БД с флагом настройки
             await saveUserToDb(cred.user, 'online', { 
                 theme: 'default', 
                 bgPattern: 'bg-flow', 
@@ -202,30 +232,38 @@ const handleGoogle = async () => { try { await signInWithPopup(auth, provider); 
 if(document.getElementById('googleLoginBtn')) document.getElementById('googleLoginBtn').addEventListener('click', handleGoogle);
 if(document.getElementById('googleRegBtn')) document.getElementById('googleRegBtn').addEventListener('click', handleGoogle);
 
+// === ГЛАВНЫЙ СЛУШАТЕЛЬ [ИЗМЕНЕНО] ===
 onAuthStateChanged(auth, async (user) => {
     try {
         if (user) { 
+            // === ПОЛЬЗОВАТЕЛЬ ВОШЕЛ ===
             currentUserUid = user.uid; 
             closeModal('authModal'); 
             if(settingsProfileInfo) settingsProfileInfo.innerHTML = `<img src="${user.photoURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}"><h2>${user.displayName || 'User'}</h2><p>${user.email}</p>`; 
 
+            // Обновляем "последний вход"
             await saveUserToDb(user, 'online');
             
+            // ЗАГРУЖАЕМ ТЕМУ ИЗ БАЗЫ ДАННЫХ (Приоритет)
             const userDoc = await getDoc(doc(db, "users", user.uid));
             if (userDoc.exists()) {
                 const data = userDoc.data();
                 
+                // Если в базе есть сохраненная тема, применяем ЕЁ (переписываем localStorage)
                 if (data.theme) {
                     currentSelectedTheme = data.theme;
-                    localStorage.setItem('fusion-theme', data.theme);
+                    localStorage.setItem('fusion-theme', data.theme); 
                     applyTheme(data.theme);
                 }
+                
+                // То же самое для фона
                 if (data.bgPattern) {
                     currentSelectedBg = data.bgPattern;
                     localStorage.setItem('fusion-bg-pattern', data.bgPattern);
                     applyBgPattern(data.bgPattern);
                 }
                 
+                // Проверка настройки профиля
                 if (!data.isProfileSetup) {
                     openModal('initialSetupModal');
                     setupDisplayName.value = user.displayName || '';
@@ -233,13 +271,18 @@ onAuthStateChanged(auth, async (user) => {
                     setupAvatarPreview.src = user.photoURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png';
                 }
                 
+                // Синхронизация UI настроек
                 if(bgAnimSelect) bgAnimSelect.value = currentSelectedBg;
                 if(statusSelect && data.status) statusSelect.value = data.status;
                 if(customStatusInput && data.customStatusText) customStatusInput.value = data.customStatusText;
             }
         } else {
+            // === ПОЛЬЗОВАТЕЛЬ ВЫШЕЛ ===
             currentUserUid = null; 
+            
+            // СБРАСЫВАЕМ ТЕМУ (вызов новой функции)
             resetVisualSettings(); 
+            
             openModal('authModal'); 
             loginForm.style.display = 'flex'; 
             registerChoice.style.display = 'none'; 
@@ -248,6 +291,7 @@ onAuthStateChanged(auth, async (user) => {
     } catch (e) {
         console.error("Auth:", e);
     } finally {
+        // Убираем лоадер, если он есть
         if(appLoader) appLoader.classList.add('hidden');
     }
 });
@@ -255,12 +299,14 @@ onAuthStateChanged(auth, async (user) => {
 async function saveUserToDb(user, statusOverride = null, extraData = {}) {
     const userRef = doc(db, "users", user.uid); 
     const snap = await getDoc(userRef);
+    
     let userData = {
         uid: user.uid, 
         email: user.email, 
         lastLogin: serverTimestamp(),
         ...extraData
     };
+
     if (snap.exists()) {
         const d = snap.data();
         if (!userData.displayName) userData.displayName = d.displayName || user.displayName || "User";
@@ -271,17 +317,21 @@ async function saveUserToDb(user, statusOverride = null, extraData = {}) {
     } else {
         if (!userData.username) userData.username = "user";
     }
+
     if (statusOverride) userData.status = statusOverride; 
     await setDoc(userRef, userData, { merge: true });
 }
 
+// === НАСТРОЙКИ (Кнопка Сохранить) [ИЗМЕНЕНО] ===
 if(saveSettingsBtn) { 
     saveSettingsBtn.addEventListener('click', async () => { 
         if (!currentUserUid) return; 
         try { 
+            // 1. Сохраняем локально (для скорости)
             localStorage.setItem('fusion-theme', currentSelectedTheme);
             localStorage.setItem('fusion-bg-pattern', currentSelectedBg);
             
+            // 2. Сохраняем В ОБЛАКО (для привязки к аккаунту)
             const userRef = doc(db, "users", currentUserUid); 
             await updateDoc(userRef, { 
                 status: statusSelect.value, 
@@ -294,22 +344,28 @@ if(saveSettingsBtn) {
     }); 
 }
 
+// === НАСТРОЙКА ПРОФИЛЯ ===
 if(setupAvatarUrl) { setupAvatarUrl.addEventListener('input', () => { setupAvatarPreview.src = setupAvatarUrl.value || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'; }); }
+
 if(finishSetupBtn) {
     finishSetupBtn.addEventListener('click', async () => {
         const dName = setupDisplayName.value.trim(); const uName = setupUsername.value.trim(); const ava = setupAvatarUrl.value.trim() || "https://cdn-icons-png.flaticon.com/512/847/847969.png";
         if(dName.length < 1 || uName.length < 3) return showToast("Заполните поля", "error");
+        
         try {
             const q = query(collection(db, "users"), where("username", "==", uName));
             const check = await getDocs(q);
             if(!check.empty && check.docs[0].id !== currentUserUid) return showToast("Username занят", "error");
+
             await updateProfile(auth.currentUser, { displayName: dName, photoURL: ava });
             await saveUserToDb(auth.currentUser, 'online', { displayName: dName, username: uName, photoURL: ava, isProfileSetup: true });
+            
             closeModal('initialSetupModal'); showToast("Профиль готов!", "success"); window.location.reload(); 
         } catch(e) { showToast("Ошибка: " + e.message, "error"); }
     });
 }
 
+// === РЕДАКТИРОВАНИЕ ПРОФИЛЯ ===
 if(openEditProfileBtn) {
     openEditProfileBtn.addEventListener('click', async () => {
         closeModal('settingsModal'); openModal('editProfileModal');
@@ -328,15 +384,21 @@ if(saveProfileChangesBtn) {
             const userRef = doc(db, "users", currentUserUid);
             const snap = await getDoc(userRef);
             const data = snap.data();
+
             if(data.username !== uName) {
                 const q = query(collection(db, "users"), where("username", "==", uName)); const check = await getDocs(q);
                 if(!check.empty) return showToast("Username занят", "error");
-                const now = Date.now(); const lastChange = data.lastUsernameChange ? data.lastUsernameChange.toMillis() : 0;
+                
+                const now = Date.now();
+                const lastChange = data.lastUsernameChange ? data.lastUsernameChange.toMillis() : 0;
                 if (now - lastChange < 60000) return showToast("Менять username можно раз в минуту", "error");
             }
+
             await updateProfile(auth.currentUser, { displayName: dName, photoURL: ava });
+            
             let updates = { displayName: dName, photoURL: ava };
             if(data.username !== uName) { updates.username = uName; updates.lastUsernameChange = serverTimestamp(); }
+            
             await updateDoc(userRef, updates);
             closeModal('editProfileModal'); showToast("Сохранено", "success");
             if(settingsProfileInfo) settingsProfileInfo.innerHTML = `<img src="${ava}"><h2>${dName}</h2><p>${auth.currentUser.email}</p>`;
@@ -346,28 +408,24 @@ if(saveProfileChangesBtn) {
 
 if(logoutBtn) { logoutBtn.addEventListener('click', async () => { if (currentUserUid) { await updateDoc(doc(db, "users", currentUserUid), { status: 'offline' }); } await signOut(auth); resetVisualSettings(); closeModal('settingsModal'); showToast("Выход выполнен", "info"); }); }
 
-// === ЛОГИКА УДАЛЕНИЯ АККАУНТА (БЕЗ ПЕРЕЗАХОДА) ===
+// === УДАЛЕНИЕ АККАУНТА ===
 if(deleteAccountBtn) {
     deleteAccountBtn.addEventListener('click', async () => {
-        const confirmed = await showAuthConfirm("ВНИМАНИЕ! Удаление навсегда.\nВсе данные и друзья будут удалены.\nЭто действие нельзя отменить.");
+        const confirmed = await showAuthConfirm("ВНИМАНИЕ! Удаление навсегда.\nВсе данные будут стерты.\nПродолжить?");
         if(!confirmed) return;
         
         if (currentUserUid) {
             document.body.style.cursor = 'wait';
-            
-            // 1. Очистка данных из базы (не требует свежего входа, только авторизацию)
             try {
-                // Удаляем из друзей у других
+                // 1. Очистка данных
                 const myFriendsSnap = await getDocs(collection(db, "users", currentUserUid, "friends"));
                 const removeFriendPromises = myFriendsSnap.docs.map(friendDoc => deleteDoc(doc(db, "users", friendDoc.id, "friends", currentUserUid)));
                 await Promise.all(removeFriendPromises);
                 
-                // Удаляем из групп
                 const groupsQ = query(collection(db, "groups"), where("members", "array-contains", currentUserUid));
                 const groupsSnap = await getDocs(groupsQ);
                 groupsSnap.forEach(async (gDoc) => { try { await updateDoc(doc(db, "groups", gDoc.id), { members: arrayRemove(currentUserUid) }); } catch(e){} });
 
-                // Удаляем заявки
                 const sentReqQ = query(collection(db, "friend_requests"), where("from", "==", currentUserUid));
                 const sentSnap = await getDocs(sentReqQ);
                 sentSnap.forEach(async (d) => await deleteDoc(d.ref));
@@ -375,26 +433,27 @@ if(deleteAccountBtn) {
                 const recSnap = await getDocs(recReqQ);
                 recSnap.forEach(async (d) => await deleteDoc(d.ref));
 
-                // Удаляем профиль
                 await deleteDoc(doc(db, "users", currentUserUid));
-            } catch(e) { 
-                console.warn("Ошибка при очистке данных:", e); 
-            }
 
-            // 2. Попытка удалить аккаунт в Auth
-            try {
+                // 2. Удаление из Auth
                 const user = auth.currentUser;
-                await user.delete();
-                // Если успешно:
-                finishDeletion();
+                await deleteUser(user);
+                
+                document.body.style.cursor = 'default';
+                closeModal('settingsModal');
+                resetVisualSettings();
+                alert("Аккаунт удален.");
+                window.location.reload();
+
             } catch(e) {
-                // Если ошибка "Требуется свежий вход"
+                // Если требует перезахода
                 if (e.code === 'auth/requires-recent-login') {
-                    // Мы УЖЕ удалили все данные из базы (шаг 1).
-                    // Для пользователя аккаунт фактически уничтожен.
-                    // Просто выходим из системы.
                     await signOut(auth);
-                    finishDeletion();
+                    document.body.style.cursor = 'default';
+                    closeModal('settingsModal');
+                    resetVisualSettings();
+                    alert("Аккаунт удален (данные стерты).");
+                    window.location.reload();
                 } else {
                     document.body.style.cursor = 'default';
                     alert("Ошибка: " + e.message);
@@ -402,14 +461,6 @@ if(deleteAccountBtn) {
             }
         }
     });
-}
-
-function finishDeletion() {
-    document.body.style.cursor = 'default';
-    closeModal('settingsModal');
-    resetVisualSettings();
-    alert("Аккаунт удален.");
-    window.location.reload();
 }
 
 window.addEventListener("beforeunload", () => { if (currentUserUid) { updateDoc(doc(db, "users", currentUserUid), { status: 'offline' }); } });

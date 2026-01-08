@@ -1,204 +1,388 @@
 import { db, auth } from "./firebase-config.js";
-import { collection, doc, setDoc, addDoc, onSnapshot, updateDoc, deleteDoc, getDoc, query, where } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { collection, addDoc, onSnapshot, doc, updateDoc, serverTimestamp, query, where, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { showToast, openModal, closeModal } from "./toast.js";
-import { isGlobalMuted, updateUserActivity } from "./chat.js";
 
-const servers = { iceServers: [{ urls: ['stun:stun1.l.google.com:19302', 'stun:stun2.l.google.com:19302'] }] };
+// Серверы
+const servers = {
+    iceServers: [
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
+        { urls: 'stun:stun.services.mozilla.com' } 
+    ]
+};
+
+const rtcConfig = { offerToReceiveAudio: true, offerToReceiveVideo: false };
 
 let pc = null;
 let localStream = null;
-let currentCallDocId = null;
-let unsubscribeCall = null;
-let unsubscribeIncoming = null;
-let unsubscribeGlobalListener = null;
-let timerInterval = null;
-let isCaller = false;
-let currentUser = null;
+let callDocId = null;
+let unsubscribes = [];
+let callTimerInterval = null;
+let candidatesQueue = []; 
 
-const callInterface = document.getElementById('callInterface');
+// Время и ID чата
+let connectionStartTime = null;
+let activeChatId = null;
+let activeChatType = null;
+
+// Audio
+let audioContext = null;
+let localAnalyser = null;
+let remoteAnalyser = null;
+let voiceLoop = null;
+
+// UI
+const remoteAudio = document.getElementById('remoteAudio');
 const callStatusText = document.getElementById('callStatusText');
 const callTimer = document.getElementById('callTimer');
+
+// Buttons
 const hangupBtn = document.getElementById('hangupBtn');
-const muteBtn = document.getElementById('muteBtn');
-const muteIcon = document.getElementById('muteIcon');
-const remoteAudio = document.getElementById('remoteAudio');
-
-const localCallAvatar = document.getElementById('localCallAvatar');
-const remoteCallAvatar = document.getElementById('remoteCallAvatar');
-const localAvatarWrapper = document.getElementById('localAvatarWrapper');
-const remoteAvatarWrapper = document.getElementById('remoteAvatarWrapper');
-const remoteAvatarLabel = document.getElementById('remoteAvatarLabel');
-
-const incomingCallModal = document.getElementById('incomingCallModal');
-const incomingCallerName = document.getElementById('incomingCallerName');
-const incomingAvatarImg = document.getElementById('incomingAvatarImg');
+const toggleMicBtn = document.getElementById('toggleMicBtn');
 const answerCallBtn = document.getElementById('answerCallBtn');
-const rejectCallBtn = document.getElementById('rejectCallBtn');
+const declineCallBtn = document.getElementById('declineCallBtn');
+const incomingCallControls = document.getElementById('incomingCallControls');
+const callControls = document.querySelector('.call-controls');
 
-const soundRingtone = document.getElementById('soundRingtone');
-const soundConnecting = document.getElementById('soundConnecting');
+// Avatars
+const remoteAvatarImg = document.getElementById('remoteAvatarImg');
+const remoteAvatarContainer = document.getElementById('remoteAvatarContainer');
+const remoteName = document.getElementById('remoteName');
+const remoteVoiceIndicator = document.getElementById('remoteVoiceIndicator');
+const remoteMuteIcon = document.getElementById('remoteMuteIcon');
 
-function playSound(type) { stopSounds(); if (type === 'ringtone') soundRingtone.play().catch(()=>{}); if (type === 'connecting') soundConnecting.play().catch(()=>{}); }
-function stopSounds() { soundRingtone.pause(); soundRingtone.currentTime = 0; soundConnecting.pause(); soundConnecting.currentTime = 0; }
+const localAvatarImg = document.getElementById('localAvatarImg');
+const localVoiceIndicator = document.getElementById('localVoiceIndicator');
+const localMuteIcon = document.getElementById('localMuteIcon');
 
-onAuthStateChanged(auth, (user) => { if (user) { currentUser = user; initGlobalCallListener(); } else { if (unsubscribeGlobalListener) unsubscribeGlobalListener(); } });
+const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-function initGlobalCallListener() {
-    if (unsubscribeGlobalListener) unsubscribeGlobalListener();
-    const q = query(collection(db, "calls"), where("responderId", "==", currentUser.uid), where("status", "==", "offer"));
-    unsubscribeGlobalListener = onSnapshot(q, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === "added") {
-                const callData = change.doc.data();
-                if (!currentCallDocId) { showIncomingCall(change.doc.id, callData); }
-            }
+// === 1. ИНИЦИАЛИЗАЦИЯ ===
+export function initCallSystem() {
+    auth.onAuthStateChanged((user) => {
+        if (!user) return;
+        unsubscribes.forEach(u => u());
+        unsubscribes = [];
+        
+        const q = query(collection(db, "calls"), where("calleeId", "==", user.uid));
+        const unsub = onSnapshot(q, (snapshot) => {
+            snapshot.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    const data = change.doc.data();
+                    const now = Date.now();
+                    const created = data.createdAt ? data.createdAt.toMillis() : now;
+                    if (!data.answer && !data.endedAt && (now - created < 300000)) {
+                        showIncomingCall(change.doc.id, data);
+                    }
+                }
+            });
         });
+        unsubscribes.push(unsub);
     });
 }
 
-function resetMuteState() {
-    muteBtn.classList.remove('active');
-    muteIcon.textContent = 'mic';
-    localAvatarWrapper.classList.remove('muted');
-}
-
-export async function startCall(target, isGroup = false) {
-    if (currentCallDocId) return showToast("Вы уже в звонке", "error");
-    if (isGroup) return showToast("Групповые звонки пока в разработке", "info");
-
-    isCaller = true; currentCallDocId = await createCallDoc(target);
-    resetMuteState();
+// === 2. ИСХОДЯЩИЙ ЗВОНОК ===
+export async function startCall(targetUserId, targetUserName, targetUserPhoto, chatId, chatType) {
+    if (!targetUserId) return;
+    resetCallState();
     
-    callInterface.style.display = 'flex';
-    localCallAvatar.src = currentUser.photoURL; remoteCallAvatar.src = target.photoURL; remoteAvatarLabel.textContent = target.displayName;
-    callStatusText.textContent = "Соединение..."; callTimer.style.display = "none";
-    updateUserActivity("Звонит..."); playSound('connecting');
+    activeChatId = chatId;
+    activeChatType = chatType;
 
-    await initWebRTC();
-}
+    openModal('callModal');
+    updateUIState('dialing', { displayName: targetUserName, photoURL: targetUserPhoto });
 
-export function checkCallVisibility(chatId) { if (currentCallDocId && callInterface.style.display !== 'flex') callInterface.style.display = 'flex'; }
-
-async function createCallDoc(target) {
-    const callDocRef = doc(collection(db, "calls"));
-    await setDoc(callDocRef, { callerId: currentUser.uid, callerName: currentUser.displayName, callerPhoto: currentUser.photoURL, responderId: target.uid, status: 'offer' });
-    return callDocRef.id;
-}
-
-async function initWebRTC() {
-    pc = new RTCPeerConnection(servers);
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    localStream.getTracks().forEach(track => { track.enabled = true; pc.addTrack(track, localStream); });
-    
-    setupVoiceActivity(localStream, localAvatarWrapper);
-
-    pc.ontrack = (event) => { event.streams[0].getTracks().forEach(track => { remoteAudio.srcObject = event.streams[0]; setupVoiceActivity(event.streams[0], remoteAvatarWrapper); }); };
-    pc.onicecandidate = (event) => { if (event.candidate && currentCallDocId) { const collectionName = isCaller ? 'offerCandidates' : 'answerCandidates'; addDoc(collection(db, "calls", currentCallDocId, collectionName), event.candidate.toJSON()); } };
-
-    const callDocRef = doc(db, "calls", currentCallDocId);
-
-    if (isCaller) {
-        const offerDescription = await pc.createOffer();
-        await pc.setLocalDescription(offerDescription);
-        await updateDoc(callDocRef, { offer: { type: offerDescription.type, sdp: offerDescription.sdp } });
-
-        unsubscribeCall = onSnapshot(callDocRef, (snapshot) => {
-            const data = snapshot.data();
-            if (!pc.currentRemoteDescription && data?.answer) {
-                const answerDescription = new RTCSessionDescription(data.answer);
-                pc.setRemoteDescription(answerDescription);
-                callStatusText.textContent = "00:00"; startTimer(); stopSounds();
-            }
-            if (data?.status === 'hungup') endCall();
-        });
-
-        onSnapshot(collection(db, "calls", currentCallDocId, "answerCandidates"), (snapshot) => {
-            snapshot.docChanges().forEach((change) => { if (change.type === "added") { const candidate = new RTCIceCandidate(change.doc.data()); pc.addIceCandidate(candidate); } });
-        });
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+        setupAudioAnalysis(localStream, 'local'); 
+    } catch (e) {
+        handleMediaError(e);
+        return;
     }
-}
 
-async function answerCall(callId, callData) {
-    if (currentCallDocId) return; 
-    currentCallDocId = callId; isCaller = false; resetMuteState();
+    createPC();
     
-    callInterface.style.display = 'flex';
-    localCallAvatar.src = currentUser.photoURL; remoteCallAvatar.src = callData.callerPhoto; remoteAvatarLabel.textContent = callData.callerName;
-    callStatusText.textContent = "Соединение..."; callTimer.style.display = "none"; updateUserActivity("В звонке"); stopSounds();
-
-    pc = new RTCPeerConnection(servers);
-    localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    localStream.getTracks().forEach(track => { track.enabled = true; pc.addTrack(track, localStream); });
-    setupVoiceActivity(localStream, localAvatarWrapper);
-
-    pc.ontrack = (event) => { event.streams[0].getTracks().forEach(track => { remoteAudio.srcObject = event.streams[0]; setupVoiceActivity(event.streams[0], remoteAvatarWrapper); }); };
-    pc.onicecandidate = (event) => { if (event.candidate) { addDoc(collection(db, "calls", currentCallDocId, "answerCandidates"), event.candidate.toJSON()); } };
-
-    const callDocRef = doc(db, "calls", currentCallDocId);
-    const callSnap = await getDoc(callDocRef);
-    const callDataDB = callSnap.data();
-
-    await pc.setRemoteDescription(new RTCSessionDescription(callDataDB.offer));
-    const answerDescription = await pc.createAnswer();
-    await pc.setLocalDescription(answerDescription);
-
-    await updateDoc(callDocRef, { answer: { type: answerDescription.type, sdp: answerDescription.sdp }, status: 'connected' });
-    callStatusText.textContent = "00:00"; startTimer();
-
-    onSnapshot(collection(db, "calls", currentCallDocId, "offerCandidates"), (snapshot) => {
-        snapshot.docChanges().forEach((change) => { if (change.type === "added") { const candidate = new RTCIceCandidate(change.doc.data()); pc.addIceCandidate(candidate); } });
+    const callDocRef = await addDoc(collection(db, "calls"), {
+        callerId: auth.currentUser.uid,
+        callerName: auth.currentUser.displayName,
+        callerPhoto: auth.currentUser.photoURL,
+        calleeId: targetUserId,
+        createdAt: serverTimestamp(),
+        callerMuted: false,
+        calleeMuted: false,
+        chatId: chatId,
+        chatType: chatType
     });
-    
-    unsubscribeCall = onSnapshot(callDocRef, (snapshot) => { const data = snapshot.data(); if (data?.status === 'hungup') endCall(); });
-}
+    callDocId = callDocRef.id;
 
-function endCall() {
-    stopSounds();
-    if (pc) { pc.close(); pc = null; }
-    if (localStream) { localStream.getTracks().forEach(track => track.stop()); localStream = null; }
-    if (unsubscribeCall) { unsubscribeCall(); unsubscribeCall = null; }
-    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-    
-    callInterface.style.display = 'none'; callStatusText.textContent = ""; updateUserActivity("В сети");
+    pc.onicecandidate = (event) => {
+        if (event.candidate) addDoc(collection(db, "calls", callDocId, "offerCandidates"), event.candidate.toJSON());
+    };
 
-    if (currentCallDocId) { try { const callDocRef = doc(db, "calls", currentCallDocId); updateDoc(callDocRef, { status: 'hungup' }); } catch(e) {} currentCallDocId = null; }
-}
+    const offerDescription = await pc.createOffer(rtcConfig);
+    await pc.setLocalDescription(offerDescription);
+    await updateDoc(callDocRef, { offer: { sdp: offerDescription.sdp, type: offerDescription.type } });
 
-function showIncomingCall(callId, callData) {
-    playSound('ringtone');
-    incomingCallerName.textContent = callData.groupName ? `Группа: ${callData.groupName}\nОт: ${callData.callerName}` : `Звонок от: ${callData.callerName}`;
-    incomingAvatarImg.src = callData.callerPhoto;
-    openModal('incomingCallModal'); 
-    
-    unsubscribeIncoming = onSnapshot(doc(db, "calls", callId), (snapshot) => {
+    const callUnsub = onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
-        if (!data || data.status === 'hungup' || (data.status === 'connected' && data.responderId !== currentUser.uid && data.callerId !== currentUser.uid)) {
-            stopSounds(); closeModal('incomingCallModal'); if (unsubscribeIncoming) unsubscribeIncoming();
-            if (data && data.status === 'hungup') showToast("Звонок отменен", "info"); else if (data) showToast("На звонок уже ответили", "info");
+        if (!pc || !data) return;
+
+        if (!pc.currentRemoteDescription && data.answer) {
+            updateUIState('connecting'); 
+            const answerDescription = new RTCSessionDescription(data.answer);
+            await pc.setRemoteDescription(answerDescription);
+            processCandidateQueue();
         }
+        
+        if (data.calleeMuted !== undefined) updateRemoteMuteUI(data.calleeMuted);
+        if (data.endedAt) endCallLocally("Звонок завершен");
     });
-    
-    answerCallBtn.onclick = () => { if (unsubscribeIncoming) unsubscribeIncoming(); answerCall(callId, callData); closeModal('incomingCallModal'); };
-    rejectCallBtn.onclick = () => { if (unsubscribeIncoming) unsubscribeIncoming(); stopSounds(); closeModal('incomingCallModal'); updateDoc(doc(db, "calls", callId), { status: 'hungup' }); };
+    unsubscribes.push(callUnsub);
+
+    const candUnsub = onSnapshot(collection(db, "calls", callDocId, "answerCandidates"), (snap) => {
+        snap.docChanges().forEach((change) => {
+            if (change.type === "added") {
+                const candidate = new RTCIceCandidate(change.doc.data());
+                handleIceCandidate(candidate);
+            }
+        });
+    });
+    unsubscribes.push(candUnsub);
 }
 
-hangupBtn.onclick = endCall;
+// === 3. ВХОДЯЩИЙ ЗВОНОК ===
+function showIncomingCall(id, data) {
+    resetCallState();
+    callDocId = id;
+    
+    activeChatId = data.chatId || null;
+    activeChatType = data.chatType || 'direct';
 
-muteBtn.onclick = () => {
-    if (localStream) {
-        const audioTrack = localStream.getAudioTracks()[0];
-        audioTrack.enabled = !audioTrack.enabled;
-        muteBtn.classList.toggle('active');
-        if (audioTrack.enabled) { muteIcon.textContent = 'mic'; localAvatarWrapper.classList.remove('muted'); } 
-        else { muteIcon.textContent = 'mic_off'; localAvatarWrapper.classList.add('muted'); }
+    openModal('callModal');
+    updateUIState('incoming', { displayName: data.callerName, photoURL: data.callerPhoto });
+
+    answerCallBtn.onclick = () => acceptCall(id);
+    
+    declineCallBtn.onclick = async () => {
+        await updateDoc(doc(db, "calls", id), { endedAt: serverTimestamp() });
+        closeModal('callModal');
+    };
+
+    const callUnsub = onSnapshot(doc(db, "calls", id), (snap) => {
+        const d = snap.data();
+        if(d?.endedAt) endCallLocally("Звонок отменен");
+        if (d?.callerMuted !== undefined) updateRemoteMuteUI(d.callerMuted);
+    });
+    unsubscribes.push(callUnsub);
+}
+
+// === 4. ПРИНЯТИЕ ===
+async function acceptCall(id) {
+    updateUIState('connecting');
+
+    try {
+        localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
+        setupAudioAnalysis(localStream, 'local');
+    } catch (e) {
+        handleMediaError(e);
+        return;
     }
-};
 
-let seconds = 0;
+    createPC();
+
+    pc.onicecandidate = (event) => {
+        if (event.candidate) addDoc(collection(db, "calls", id, "answerCandidates"), event.candidate.toJSON());
+    };
+
+    try {
+        const callDocSnap = await getDoc(doc(db, "calls", id));
+        if (!callDocSnap.exists()) {
+            showToast("Звонок не найден", "error");
+            closeModal('callModal');
+            return;
+        }
+        
+        const freshData = callDocSnap.data();
+        if (!freshData.offer) {
+            showToast("Ошибка данных звонка", "error");
+            return;
+        }
+
+        await pc.setRemoteDescription(new RTCSessionDescription(freshData.offer));
+        
+        const answerDescription = await pc.createAnswer(rtcConfig);
+        await pc.setLocalDescription(answerDescription);
+
+        await updateDoc(doc(db, "calls", id), { 
+            answer: { type: answerDescription.type, sdp: answerDescription.sdp },
+            calleeMuted: false
+        });
+
+        const candUnsub = onSnapshot(collection(db, "calls", id, "offerCandidates"), (snap) => {
+            snap.docChanges().forEach((change) => {
+                if (change.type === "added") {
+                    const candidate = new RTCIceCandidate(change.doc.data());
+                    handleIceCandidate(candidate);
+                }
+            });
+        });
+        unsubscribes.push(candUnsub);
+        
+        processCandidateQueue();
+
+    } catch (err) {
+        console.error("Accept Error:", err);
+        showToast("Ошибка: " + err.message, "error");
+    }
+}
+
+// === 5. WEBRTC CORE ===
+
+function createPC() {
+    pc = new RTCPeerConnection(servers);
+    localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+    
+    pc.onconnectionstatechange = () => {
+        console.log("WebRTC State:", pc.connectionState);
+        if (pc.connectionState === 'connected') {
+            updateUIState('connected');
+            connectionStartTime = Date.now();
+        } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
+            endCallLocally("Связь прервалась");
+        }
+    };
+
+    pc.ontrack = (event) => {
+        if (event.streams && event.streams[0]) {
+            remoteAudio.srcObject = event.streams[0];
+            remoteAudio.play().catch(e => console.log("Autoplay:", e));
+            setupAudioAnalysis(event.streams[0], 'remote');
+        }
+    };
+}
+
+function handleIceCandidate(candidate) {
+    if (pc && pc.remoteDescription && pc.remoteDescription.type) {
+        pc.addIceCandidate(candidate).catch(e => console.warn("ICE add error:", e));
+    } else {
+        candidatesQueue.push(candidate);
+    }
+}
+
+function processCandidateQueue() {
+    if (!pc || !pc.remoteDescription) return;
+    while (candidatesQueue.length > 0) {
+        const c = candidatesQueue.shift();
+        pc.addIceCandidate(c).catch(e => console.warn("Queue ICE error:", e));
+    }
+}
+
+// === AUDIO VISUALIZER ===
+function setupAudioAnalysis(stream, source) {
+    if (!audioContext) audioContext = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioContext.state === 'suspended') audioContext.resume();
+
+    const src = audioContext.createMediaStreamSource(stream);
+    const analyser = audioContext.createAnalyser();
+    analyser.fftSize = 512;
+    src.connect(analyser);
+
+    if (source === 'local') localAnalyser = analyser;
+    else remoteAnalyser = analyser;
+
+    if (!voiceLoop) voiceLoop = requestAnimationFrame(visualizeVoice);
+}
+
+function visualizeVoice() {
+    const dataArray = new Uint8Array(128);
+    const threshold = 12; 
+
+    if (localAnalyser) {
+        localAnalyser.getByteFrequencyData(dataArray);
+        const vol = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        if (vol > threshold) localVoiceIndicator.classList.add('speaking');
+        else localVoiceIndicator.classList.remove('speaking');
+    }
+
+    if (remoteAnalyser) {
+        remoteAnalyser.getByteFrequencyData(dataArray);
+        const vol = dataArray.reduce((a, b) => a + b) / dataArray.length;
+        if (vol > threshold) remoteVoiceIndicator.classList.add('speaking');
+        else remoteVoiceIndicator.classList.remove('speaking');
+    }
+
+    voiceLoop = requestAnimationFrame(visualizeVoice);
+}
+
+// === UI & ACTIONS ===
+toggleMicBtn.addEventListener('click', async () => {
+    if (!localStream) return;
+    const audioTrack = localStream.getAudioTracks()[0];
+    if (audioTrack) {
+        audioTrack.enabled = !audioTrack.enabled;
+        const isMuted = !audioTrack.enabled;
+        
+        toggleMicBtn.classList.toggle('active');
+        toggleMicBtn.innerHTML = isMuted ? '<span class="material-symbols-outlined">mic_off</span>' : '<span class="material-symbols-outlined">mic</span>';
+        
+        if (isMuted) localMuteIcon.classList.remove('hidden');
+        else localMuteIcon.classList.add('hidden');
+
+        if (callDocId) {
+            const snap = await getDoc(doc(db, "calls", callDocId));
+            if (snap.exists()) {
+                const data = snap.data();
+                if (data.callerId === auth.currentUser.uid) updateDoc(doc(db, "calls", callDocId), { callerMuted: isMuted });
+                else updateDoc(doc(db, "calls", callDocId), { calleeMuted: isMuted });
+            }
+        }
+    }
+});
+
+function updateRemoteMuteUI(isMuted) {
+    if (isMuted) remoteMuteIcon.classList.remove('hidden');
+    else remoteMuteIcon.classList.add('hidden');
+}
+
+function updateUIState(state, userData = {}) {
+    remoteAvatarContainer.classList.remove('ringing');
+    
+    if (userData.photoURL) remoteAvatarImg.src = userData.photoURL;
+    else if (!remoteAvatarImg.src) remoteAvatarImg.src = DEFAULT_AVATAR;
+    
+    localAvatarImg.src = auth.currentUser.photoURL || DEFAULT_AVATAR;
+
+    if (state === 'dialing') {
+        callStatusText.textContent = "Вызов...";
+        remoteAvatarContainer.classList.add('ringing'); 
+        incomingCallControls.style.display = 'none';
+        callControls.style.display = 'flex';
+        remoteName.textContent = userData.displayName || "Пользователь";
+    } 
+    else if (state === 'incoming') {
+        callStatusText.textContent = "Входящий звонок";
+        remoteAvatarContainer.classList.add('ringing'); 
+        incomingCallControls.style.display = 'flex';
+        callControls.style.display = 'none';
+        remoteName.textContent = userData.displayName || "Неизвестный";
+    }
+    else if (state === 'connecting') {
+        callStatusText.textContent = "Соединение...";
+        incomingCallControls.style.display = 'none';
+        callControls.style.display = 'flex';
+    }
+    else if (state === 'connected') {
+        callStatusText.textContent = "Разговор идет";
+        startTimer();
+    }
+}
+
 function startTimer() {
-    callTimer.style.display = "block"; seconds = 0; callTimer.textContent = "00:00";
-    timerInterval = setInterval(() => {
+    let seconds = 0;
+    if (callTimerInterval) clearInterval(callTimerInterval);
+    callTimerInterval = setInterval(() => {
         seconds++;
         const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
         const secs = (seconds % 60).toString().padStart(2, '0');
@@ -206,46 +390,82 @@ function startTimer() {
     }, 1000);
 }
 
-function setupVoiceActivity(stream, wrapperElement) {
-    const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-    const analyser = audioContext.createAnalyser();
-    const microphone = audioContext.createMediaStreamSource(stream);
-    const javascriptNode = audioContext.createScriptProcessor(2048, 1, 1);
+function handleMediaError(e) {
+    console.error(e);
+    showToast("Ошибка микрофона. Проверьте HTTPS.", "error");
+    closeModal('callModal');
+}
 
-    analyser.smoothingTimeConstant = 0.8;
-    analyser.fftSize = 1024;
+function resetCallState() {
+    callDocId = null;
+    candidatesQueue = [];
+    connectionStartTime = null; 
+    
+    if (localStream) localStream.getTracks().forEach(track => track.stop());
+    if (pc) { pc.close(); pc = null; }
+    
+    toggleMicBtn.classList.remove('active');
+    toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
+    localMuteIcon.classList.add('hidden');
+    remoteMuteIcon.classList.add('hidden');
+    localVoiceIndicator.classList.remove('speaking');
+    remoteVoiceIndicator.classList.remove('speaking');
+    
+    if (voiceLoop) {
+        cancelAnimationFrame(voiceLoop);
+        voiceLoop = null; // [ИСПРАВЛЕНИЕ] Обнуляем ID анимации
+    }
+    if (audioContext) { audioContext.close(); audioContext = null; }
+}
 
-    microphone.connect(analyser);
-    analyser.connect(javascriptNode);
-    javascriptNode.connect(audioContext.destination);
+hangupBtn.addEventListener('click', async () => {
+    await sendCallEndMessage();
+    if (callDocId) await updateDoc(doc(db, "calls", callDocId), { endedAt: serverTimestamp() });
+    endCallLocally();
+});
 
-    let isSpeaking = false;
-    let silenceTimer = null;
+// Отправка сообщения о завершении
+async function sendCallEndMessage() {
+    if (!activeChatId || !auth.currentUser) return;
 
-    javascriptNode.onaudioprocess = () => {
-        const array = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteFrequencyData(array);
-        let values = 0;
-        const length = array.length;
-        for (let i = 0; i < length; i++) { values += array[i]; }
-        const average = values / length;
+    let durationText = "00:00";
+    if (connectionStartTime) {
+        const diff = Date.now() - connectionStartTime;
+        const totalSeconds = Math.floor(diff / 1000);
+        const m = Math.floor(totalSeconds / 60).toString().padStart(2, '0');
+        const s = (totalSeconds % 60).toString().padStart(2, '0');
+        durationText = `${m}:${s}`;
+    }
 
-        if (average > 15) { 
-            if (!isSpeaking) {
-                isSpeaking = true;
-                wrapperElement.classList.add('speaking');
-                if(silenceTimer) clearTimeout(silenceTimer);
-            }
-        } else {
-            if (isSpeaking) {
-                if(!silenceTimer) {
-                    silenceTimer = setTimeout(() => {
-                        wrapperElement.classList.remove('speaking');
-                        isSpeaking = false;
-                        silenceTimer = null;
-                    }, 300); 
-                }
-            }
-        }
-    };
+    // [НОВОЕ] Форматирование времени окончания
+    const now = new Date();
+    const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+    const collectionName = activeChatType === 'direct' ? 'chats' : 'groups';
+    const text = `Звонок завершен в ${timeString}. Длительность: ${durationText}`;
+
+    try {
+        await addDoc(collection(db, collectionName, activeChatId, "messages"), {
+            text: text,
+            type: 'system',
+            timestamp: serverTimestamp()
+        });
+    } catch (e) {
+        console.error("Msg error:", e);
+    }
+}
+
+function endCallLocally(msg) {
+    if (msg) showToast(msg, "info");
+    resetCallState();
+    
+    if (unsubscribes.length > 1) {
+        for (let i = 1; i < unsubscribes.length; i++) unsubscribes[i]();
+        unsubscribes.splice(1);
+    }
+    
+    if (callTimerInterval) clearInterval(callTimerInterval);
+    remoteAudio.srcObject = null;
+    remoteAvatarContainer.classList.remove('ringing');
+    closeModal('callModal');
 }

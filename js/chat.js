@@ -1,9 +1,12 @@
 import { db, auth } from "./firebase-config.js";
 import { collection, query, onSnapshot, addDoc, serverTimestamp, orderBy, where, doc, getDocs, setDoc, deleteDoc, updateDoc, arrayRemove, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { startCall, checkCallVisibility } from "./call.js";
 import { showToast, openModal, closeModal } from "./toast.js";
+import { initCallSystem, startCall } from "./call.js";
 
-export let isGlobalMuted = false;
+window.updateUserActivity = function(status) {
+    const el = document.getElementById('activityStatusText');
+    if(el) el.textContent = status;
+};
 
 let currentChatUser = null; 
 let currentChatGroup = null; 
@@ -11,7 +14,6 @@ let currentChatId = null;
 let currentChatType = null;
 let messagesUnsubscribe = null;
 
-// Элементы
 const chatsList = document.getElementById('chatsList');
 const chatRoom = document.getElementById('chatRoom');
 const emptyState = document.getElementById('emptyState');
@@ -21,16 +23,15 @@ const sendBtn = document.getElementById('sendBtn');
 const messagesList = document.getElementById('messagesList');
 const chatHeaderAvatar = document.getElementById('chatHeaderAvatar');
 const chatHeaderStatus = document.getElementById('chatHeaderStatus');
-const startCallBtn = document.getElementById('startCallBtn');
 const chatHeaderInfoArea = document.getElementById('chatHeaderInfoArea');
-const backToChatsBtn = document.getElementById('backToChatsBtn'); // [НОВОЕ]
+const backToChatsBtn = document.getElementById('backToChatsBtn');
+const chatHeader = document.querySelector('.chat-header'); 
 
 const createGroupBtn = document.getElementById('createGroupBtn');
 const confirmCreateGroupBtn = document.getElementById('confirmCreateGroupBtn');
 const usersForGroupList = document.getElementById('usersForGroupList');
 const newGroupName = document.getElementById('newGroupName');
 const closeCreateGroup = document.getElementById('closeCreateGroup');
-
 const infoGroupName = document.getElementById('infoGroupName');
 const infoGroupCount = document.getElementById('infoGroupCount');
 const deleteGroupBtn = document.getElementById('deleteGroupBtn');
@@ -42,7 +43,6 @@ const closeGroupInfo = document.getElementById('closeGroupInfo');
 
 const friendsBtn = document.getElementById('friendsBtn');
 const closeFriends = document.getElementById('closeFriends');
-const requestsBadge = document.getElementById('requestsBadge');
 const sidebarRequestsBadge = document.getElementById('sidebarRequestsBadge');
 const modalRequestsBadge = document.getElementById('modalRequestsBadge');
 const myFriendsList = document.getElementById('myFriendsList');
@@ -55,9 +55,6 @@ const miniProfileAvatar = document.getElementById('miniProfileAvatar');
 const miniProfileName = document.getElementById('miniProfileName');
 const miniProfileStatus = document.getElementById('miniProfileStatus');
 const sidebarUserProfile = document.getElementById('sidebarUserProfile');
-const globalMuteBtn = document.getElementById('globalMuteBtn');
-const globalMuteIcon = document.getElementById('globalMuteIcon');
-const activityStatusText = document.getElementById('activityStatusText');
 
 const fullProfileAvatar = document.getElementById('fullProfileAvatar');
 const fullProfileName = document.getElementById('fullProfileName');
@@ -72,12 +69,10 @@ let myFriendsData = [];
 let allGroupsData = [];
 let friendListenersUnsubscribers = [];
 
-// [НОВОЕ] Логика кнопки "Назад" для мобильных
 if (backToChatsBtn) {
     backToChatsBtn.addEventListener('click', () => {
-        document.body.classList.remove('mobile-chat-open'); // Убираем класс, показываем список
+        document.body.classList.remove('mobile-chat-open');
         currentChatId = null;
-        // Можно также сбросить выделение в списке, если нужно
     });
 }
 
@@ -86,33 +81,20 @@ function setupFriendListeners(friendUids) {
     friendListenersUnsubscribers = [];
     myFriendsData = [];
 
-    if (friendUids.length === 0) {
-        renderChatList();
-        renderMyFriendsList();
-        return;
-    }
+    if (friendUids.length === 0) { renderChatList(); return; }
 
     friendUids.forEach(uid => {
         const unsub = onSnapshot(doc(db, "users", uid), (docSnap) => {
             if (docSnap.exists()) {
                 const userData = docSnap.data();
+                const friendObj = { ...userData, uid: uid };
                 const index = myFriendsData.findIndex(u => u.uid === uid);
-                if (index !== -1) { myFriendsData[index] = userData; } 
-                else { myFriendsData.push(userData); }
+                if (index !== -1) { myFriendsData[index] = friendObj; } else { myFriendsData.push(friendObj); }
             } else {
                 const index = myFriendsData.findIndex(u => u.uid === uid);
-                if (index !== -1) {
-                    myFriendsData[index] = {
-                        uid: uid,
-                        displayName: "Аккаунт удален",
-                        username: "deleted",
-                        photoURL: "https://cdn-icons-png.flaticon.com/512/847/847969.png", 
-                        status: "deleted"
-                    };
-                }
+                if (index !== -1) { myFriendsData[index] = { uid: uid, displayName: "Аккаунт удален", status: "deleted", photoURL: "https://cdn-icons-png.flaticon.com/512/847/847969.png" }; }
             }
             renderChatList();
-            renderMyFriendsList();
             if (currentChatType === 'direct' && currentChatUser && currentChatUser.uid === uid) {
                 const user = myFriendsData.find(u => u.uid === uid);
                 updateChatHeader(user.displayName, user.photoURL, user.status);
@@ -129,18 +111,16 @@ function showCustomConfirm(msg) {
         const noBtn = document.getElementById('confirmCancelBtn');
         text.textContent = msg;
         openModal('customConfirmModal');
-        yesBtn.onclick = () => { closeModal('customConfirmModal'); resolve(true); };
-        noBtn.onclick = () => { closeModal('customConfirmModal'); resolve(false); };
+        const newYes = yesBtn.cloneNode(true); const newNo = noBtn.cloneNode(true);
+        yesBtn.parentNode.replaceChild(newYes, yesBtn); noBtn.parentNode.replaceChild(newNo, noBtn);
+        newYes.onclick = () => { closeModal('customConfirmModal'); resolve(true); };
+        newNo.onclick = () => { closeModal('customConfirmModal'); resolve(false); };
     });
-}
-
-export function updateUserActivity(status) {
-    if(activityStatusText) activityStatusText.textContent = status;
 }
 
 export function initChat() {
     auth.onAuthStateChanged(async (user) => {
-        if (!user) return;
+        if (!user) { chatsList.innerHTML = '<div class="loading-text">Войдите в аккаунт</div>'; return; }
         
         try { await updateDoc(doc(db, "users", user.uid), { status: 'online' }); } catch(e) {}
 
@@ -162,23 +142,30 @@ export function initChat() {
                         if(fullProfileUsername) fullProfileUsername.textContent = data.username ? `@${data.username}` : '';
                         const st = data.status;
                         let stText = st === 'online' ? 'В сети' : (st === 'busy' ? 'Не беспокоить' : 'Невидимка');
-                        let stClass = st === 'online' ? 'online' : (st === 'busy' ? 'busy' : 'offline');
                         fullProfileStatusText.textContent = stText;
-                        fullProfileStatusIndicator.className = `status-indicator ${stClass}`;
+                        fullProfileStatusIndicator.className = `status-indicator ${st}`;
                     }
                 });
             });
         }
         if(closeUserProfile) closeUserProfile.addEventListener('click', () => closeModal('currentUserProfileModal'));
 
-        const friendsRef = collection(db, "users", user.uid, "friends");
-        onSnapshot(friendsRef, (snapshot) => {
+        onSnapshot(collection(db, "users", user.uid, "friends"), (snapshot) => {
             const friendUids = snapshot.docs.map(d => d.id);
             setupFriendListeners(friendUids);
         });
 
-        const qGroups = query(collection(db, "groups"), where("members", "array-contains", user.uid));
-        onSnapshot(qGroups, (snapshot) => { allGroupsData = []; snapshot.forEach(doc => allGroupsData.push({ id: doc.id, ...doc.data() })); renderChatList(); });
+        try {
+            const qGroups = query(collection(db, "groups"), where("members", "array-contains", user.uid));
+            onSnapshot(qGroups, (snapshot) => { 
+                allGroupsData = []; 
+                snapshot.forEach(doc => allGroupsData.push({ id: doc.id, ...doc.data() })); 
+                renderChatList(); 
+            }, (error) => {
+                console.error("Ошибка групп:", error);
+                chatsList.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:red">Ошибка доступа или индекса.</div>';
+            });
+        } catch(e) { console.error("Group Query Error:", e); }
         
         const qRequests = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "pending"));
         onSnapshot(qRequests, (snapshot) => {
@@ -195,22 +182,15 @@ export function initChat() {
     });
 }
 
-if(globalMuteBtn) {
-    globalMuteBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        isGlobalMuted = !isGlobalMuted;
-        if(isGlobalMuted) { globalMuteBtn.classList.add('active'); globalMuteIcon.textContent = 'mic_off'; showToast("Микрофон выключен (для новых звонков)", "info"); } 
-        else { globalMuteBtn.classList.remove('active'); globalMuteIcon.textContent = 'mic'; showToast("Микрофон включен", "info"); }
-    });
-}
-
 function renderChatList() {
     chatsList.innerHTML = '';
     allGroupsData.forEach(group => {
         const item = document.createElement('div'); item.className = 'chat-user-item';
         item.innerHTML = `<div class="avatar-wrapper"><img src="https://cdn-icons-png.flaticon.com/512/681/681494.png" class="user-avatar-small"></div><div class="user-info-col"><div class="user-name">${group.name}</div><div class="user-status-text">Группа • ${group.members.length} уч.</div></div>`;
-        item.addEventListener('click', () => openChat(group, 'group')); chatsList.appendChild(item);
+        item.addEventListener('click', () => openChat(group, 'group')); 
+        chatsList.appendChild(item);
     });
+
     myFriendsData.forEach(user => {
         let statusClass = 'status-offline';
         if (user.status === 'online') statusClass = 'status-online';
@@ -222,80 +202,80 @@ function renderChatList() {
 
         const item = document.createElement('div'); item.className = 'chat-user-item';
         item.innerHTML = `<div class="avatar-wrapper"><img src="${user.photoURL}" class="user-avatar-small"><div class="status-dot ${statusClass}"></div></div><div class="user-info-col"><div class="user-name">${user.displayName}</div><div class="user-status-text">${statusText}</div></div>`;
-        item.addEventListener('click', () => {
-             if(user.status !== 'deleted') openChat(user, 'direct');
-             else showToast("Этот аккаунт удален", "error");
-        }); 
+        item.addEventListener('click', () => { if(user.status !== 'deleted') openChat(user, 'direct'); else showToast("Этот аккаунт удален", "error"); }); 
         chatsList.appendChild(item);
     });
     
     if (allGroupsData.length === 0 && myFriendsData.length === 0) {
-        chatsList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-sub); font-size:14px;">Нет чатов.<br>Добавьте друзей!</div>';
+        chatsList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-sub); font-size:14px;">Нет чатов.<br>Найдите друзей через поиск!</div>';
     }
 }
 
 function resetChatUI() {
-    chatRoom.style.display = 'none';
-    emptyState.style.display = 'flex';
-    document.body.classList.remove('mobile-chat-open'); // [НОВОЕ] Сброс мобильного вида
-    currentChatId = null;
-    currentChatUser = null;
-    currentChatGroup = null;
-    updateUserActivity("В меню");
+    chatRoom.style.display = 'none'; emptyState.style.display = 'flex';
+    document.body.classList.remove('mobile-chat-open');
+    currentChatId = null; currentChatUser = null; currentChatGroup = null;
+    if(window.updateUserActivity) window.updateUserActivity("В меню");
 }
 
 let activeChatUserUnsubscribe = null; 
 
+// js/chat.js (Частичное обновление или замена функции openChat)
+
 function openChat(target, type) {
-    if (activeChatUserUnsubscribe) {
-        activeChatUserUnsubscribe();
-        activeChatUserUnsubscribe = null;
-    }
+    if (activeChatUserUnsubscribe) { activeChatUserUnsubscribe(); activeChatUserUnsubscribe = null; }
 
     currentChatType = type; 
-    if(startCallBtn) startCallBtn.style.display = 'flex';
-    updateUserActivity(`В чате: ${type === 'direct' ? target.displayName : target.name}`);
-    
-    // [НОВОЕ] Переключаем вид на мобильных
+    if(window.updateUserActivity) window.updateUserActivity(`В чате: ${type === 'direct' ? target.displayName : target.name}`);
     document.body.classList.add('mobile-chat-open');
 
     if (type === 'direct') {
-        currentChatUser = target; currentChatGroup = null; const ids = [auth.currentUser.uid, target.uid].sort(); currentChatId = ids[0] + "_" + ids[1];
+        currentChatUser = target; currentChatGroup = null; 
+        const ids = [auth.currentUser.uid, target.uid].sort(); 
+        currentChatId = ids[0] + "_" + ids[1];
         updateChatHeader(target.displayName, target.photoURL, target.status);
-
         const userDocRef = doc(db, "users", target.uid);
         activeChatUserUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
-            if (!docSnap.exists()) {
-                showToast("Пользователь удалил свой аккаунт", "info");
-                resetChatUI();
-                if (activeChatUserUnsubscribe) activeChatUserUnsubscribe();
-            }
+            if (!docSnap.exists()) { showToast("Пользователь удален", "info"); resetChatUI(); }
         });
-
     } else {
         currentChatGroup = target; currentChatUser = null; currentChatId = target.id;
         updateChatHeader(target.name, "https://cdn-icons-png.flaticon.com/512/681/681494.png", 'group');
-        
         const groupDocRef = doc(db, "groups", target.id);
         activeChatUserUnsubscribe = onSnapshot(groupDocRef, (docSnap) => {
-             if (!docSnap.exists()) {
-                showToast("Эта группа была удалена", "info");
-                resetChatUI();
-             }
+             if (!docSnap.exists()) { showToast("Группа удалена", "info"); resetChatUI(); }
         });
     }
+    
+    // [ИЗМЕНЕНО] Логика кнопки звонка
+    const oldCallBtn = document.getElementById('headerCallBtn');
+    if (oldCallBtn) oldCallBtn.remove();
 
-    checkCallVisibility(currentChatId);
+    if (type === 'direct') {
+        const callBtn = document.createElement('button');
+        callBtn.id = 'headerCallBtn';
+        callBtn.className = 'icon-btn';
+        callBtn.innerHTML = '<span class="material-symbols-outlined">call</span>';
+        callBtn.style.marginLeft = '10px';
+        callBtn.title = "Позвонить";
+        
+        callBtn.onclick = () => {
+            // [ВАЖНО] Теперь передаем currentChatId и currentChatType
+            startCall(target.uid, target.displayName, target.photoURL, currentChatId, currentChatType);
+        };
+
+        chatHeader.appendChild(callBtn);
+    }
+    
     emptyState.style.display = 'none'; chatRoom.style.display = 'flex'; messagesList.innerHTML = ''; loadMessages();
 }
 
 function updateChatHeader(name, photo, status) {
     chatTitle.textContent = name; chatHeaderAvatar.innerHTML = `<img src="${photo}">`;
-    if (status === 'group') { chatHeaderStatus.textContent = 'Групповой чат (Нажмите для инфо)'; chatHeaderStatus.style.color = 'var(--text-sub)'; } 
+    if (status === 'group') { chatHeaderStatus.textContent = 'Группа'; chatHeaderStatus.style.color = 'var(--text-sub)'; } 
     else { 
         if (status === 'online') { chatHeaderStatus.textContent = 'В сети'; chatHeaderStatus.style.color = '#2cc069'; }
         else if (status === 'busy') { chatHeaderStatus.textContent = 'Не беспокоить'; chatHeaderStatus.style.color = '#ff4444'; }
-        else if (status === 'deleted') { chatHeaderStatus.textContent = 'Аккаунт удален'; chatHeaderStatus.style.color = '#333'; }
         else { chatHeaderStatus.textContent = 'Не в сети'; chatHeaderStatus.style.color = 'var(--text-sub)'; }
     }
 }
@@ -303,7 +283,7 @@ function updateChatHeader(name, photo, status) {
 async function sendMessage() {
     const text = messageInput.value; if (text.trim() === '' || !currentChatId) return;
     let collectionRef = currentChatType === 'direct' ? collection(db, "chats", currentChatId, "messages") : collection(db, "groups", currentChatId, "messages");
-    try { await addDoc(collectionRef, { text: text, senderId: auth.currentUser.uid, senderName: auth.currentUser.displayName, timestamp: serverTimestamp() }); messageInput.value = ''; } catch (error) { console.error(error); }
+    try { await addDoc(collectionRef, { text: text, senderId: auth.currentUser.uid, senderName: auth.currentUser.displayName, timestamp: serverTimestamp() }); messageInput.value = ''; } catch (error) { console.error(error); showToast("Ошибка отправки", "error"); }
 }
 
 function loadMessages() {
@@ -314,58 +294,48 @@ function loadMessages() {
         messagesList.innerHTML = ''; 
         snapshot.forEach((doc) => {
             const msg = doc.data(); const isMe = msg.senderId === auth.currentUser.uid;
-            if (msg.type === 'system') { const sysDiv = document.createElement('div'); sysDiv.style.textAlign = 'center'; sysDiv.style.fontSize = '12px'; sysDiv.style.color = 'var(--text-sub)'; sysDiv.style.margin = '10px 0'; sysDiv.textContent = msg.text; messagesList.appendChild(sysDiv); return; }
+            if (msg.type === 'system') { const sysDiv = document.createElement('div'); sysDiv.style.textAlign='center'; sysDiv.style.fontSize='12px'; sysDiv.style.color='#888'; sysDiv.textContent = msg.text; messagesList.appendChild(sysDiv); return; }
             const msgDiv = document.createElement('div'); msgDiv.className = `message-bubble ${isMe ? 'my-message' : 'friend-message'}`;
-            if (currentChatType === 'group' && !isMe) { const nameLabel = document.createElement('div'); nameLabel.style.fontSize = '11px'; nameLabel.style.color = '#888'; nameLabel.style.marginBottom = '2px'; nameLabel.textContent = msg.senderName; msgDiv.appendChild(nameLabel); }
+            if (currentChatType === 'group' && !isMe) { const nameLabel = document.createElement('div'); nameLabel.style.fontSize = '11px'; nameLabel.style.color = '#888'; nameLabel.textContent = msg.senderName; msgDiv.appendChild(nameLabel); }
             const textNode = document.createElement('div'); textNode.textContent = msg.text; msgDiv.appendChild(textNode); messagesList.appendChild(msgDiv);
         });
         messagesList.scrollTop = messagesList.scrollHeight;
-    });
+    }, (error) => console.log("Msg error (ignore if new chat)"));
 }
 
 if(friendsBtn) friendsBtn.addEventListener('click', () => { openModal('friendsModal'); renderMyFriendsList(); });
 if(closeFriends) closeFriends.addEventListener('click', () => closeModal('friendsModal'));
 
 userSearchBtn.addEventListener('click', async () => {
-    const queryText = userSearchInput.value.trim(); 
-    if (!queryText) return;
-    
+    const queryText = userSearchInput.value.trim(); if (!queryText) return;
     searchResultsList.innerHTML = '<div style="padding:10px;">Поиск...</div>';
-    
     let q;
-    if (queryText.startsWith('@')) {
-        const username = queryText.substring(1);
-        q = query(collection(db, "users"), where("username", "==", username));
-    } else {
-        q = query(collection(db, "users"), where("displayName", ">=", queryText), where("displayName", "<=", queryText + "\uf8ff"));
-    }
-
-    const snapshot = await getDocs(q);
-    searchResultsList.innerHTML = '';
-    if (snapshot.empty) { searchResultsList.innerHTML = '<div style="padding:10px;">Никого не найдено</div>'; return; }
-    snapshot.forEach(docSnap => {
-        const userData = docSnap.data();
-        const user = { ...userData, uid: docSnap.id }; 
-        
-        if (user.uid === auth.currentUser.uid) return;
-        const isFriend = myFriendsData.some(f => f.uid === user.uid);
-        const card = document.createElement('div'); card.className = 'friend-card';
-        card.innerHTML = `<img src="${user.photoURL}"><div class="friend-name">${user.displayName} <span style='font-size:11px;color:#888'>@${user.username||''}</span></div>${!isFriend ? `<button class="btn-add-friend" data-uid="${user.uid}">Добавить</button>` : '<span style="font-size:12px;color:green;">Друзья</span>'}`;
-        if (!isFriend) card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
-        searchResultsList.appendChild(card);
-    });
+    if (queryText.startsWith('@')) { q = query(collection(db, "users"), where("username", "==", queryText.substring(1))); } 
+    else { q = query(collection(db, "users"), where("displayName", ">=", queryText), where("displayName", "<=", queryText + "\uf8ff")); }
+    try {
+        const snapshot = await getDocs(q);
+        searchResultsList.innerHTML = '';
+        if (snapshot.empty) { searchResultsList.innerHTML = '<div style="padding:10px;">Никого не найдено</div>'; return; }
+        snapshot.forEach(docSnap => {
+            const userData = docSnap.data(); const user = { ...userData, uid: docSnap.id }; 
+            if (user.uid === auth.currentUser.uid) return;
+            const isFriend = myFriendsData.some(f => f.uid === user.uid);
+            const card = document.createElement('div'); card.className = 'friend-card';
+            card.innerHTML = `<img src="${user.photoURL}"><div class="friend-name">${user.displayName} <span style='font-size:11px;color:#888'>@${user.username||''}</span></div>${!isFriend ? `<button class="btn-add-friend" data-uid="${user.uid}">Добавить</button>` : '<span style="font-size:12px;color:green;">Друзья</span>'}`;
+            if (!isFriend) card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
+            searchResultsList.appendChild(card);
+        });
+    } catch(e) { searchResultsList.innerHTML = '<div style="padding:10px; color:red;">Ошибка поиска (нужен индекс?)</div>'; console.error(e); }
 });
 
 async function sendFriendRequest(targetUser) {
-    if (!targetUser || !targetUser.uid) return showToast("Ошибка: пользователь не найден", "error");
     try { 
         const checkQ = query(collection(db, "friend_requests"), where("from", "==", auth.currentUser.uid), where("to", "==", targetUser.uid));
         const checkSnap = await getDocs(checkQ);
         if (!checkSnap.empty) { return showToast("Заявка уже отправлена", "info"); }
-
         await addDoc(collection(db, "friend_requests"), { from: auth.currentUser.uid, to: targetUser.uid, fromName: auth.currentUser.displayName, fromPhoto: auth.currentUser.photoURL, status: 'pending', timestamp: serverTimestamp() }); 
         showToast("Заявка отправлена", "success"); 
-    } catch (e) { console.error(e); showToast("Ошибка: " + e.message, "error"); }
+    } catch (e) { showToast("Ошибка: " + e.message, "error"); }
 }
 
 function renderFriendRequests(docs) {
@@ -398,7 +368,7 @@ function renderMyFriendsList() {
 async function removeFriend(friendUid) {
     const confirmed = await showCustomConfirm("Удалить пользователя из друзей?");
     if(!confirmed) return;
-    try { await deleteDoc(doc(db, "users", auth.currentUser.uid, "friends", friendUid)); await deleteDoc(doc(db, "users", friendUid, "friends", auth.currentUser.uid)); showToast("Пользователь удален из друзей", "info"); } catch (e) { showToast(e.message, "error"); }
+    try { await deleteDoc(doc(db, "users", auth.currentUser.uid, "friends", friendUid)); await deleteDoc(doc(db, "users", friendUid, "friends", auth.currentUser.uid)); showToast("Удален", "info"); } catch (e) { showToast(e.message, "error"); }
 }
 
 if(createGroupBtn) createGroupBtn.addEventListener('click', () => { openModal('createGroupModal'); loadUsersForGroup(); });
@@ -418,7 +388,7 @@ function loadUsersForGroup() {
 confirmCreateGroupBtn.addEventListener('click', async () => {
     const name = newGroupName.value; const checkboxes = document.querySelectorAll('.hidden-checkbox:checked'); const members = [auth.currentUser.uid];
     checkboxes.forEach(cb => members.push(cb.value));
-    if (!name) return showToast("Введите название группы", "error"); if (members.length < 2) return showToast("Выберите участников", "error");
+    if (!name) return showToast("Введите название", "error"); if (members.length < 2) return showToast("Выберите участников", "error");
     try { await addDoc(collection(db, "groups"), { name: name, members: members, createdBy: auth.currentUser.uid, createdAt: serverTimestamp() }); showToast("Группа создана!", "success"); closeModal('createGroupModal'); newGroupName.value = ''; } catch (e) { showToast("Ошибка: " + e.message, "error"); }
 });
 
@@ -432,24 +402,23 @@ chatHeaderInfoArea.addEventListener('click', () => {
 if(closeGroupInfo) closeGroupInfo.addEventListener('click', () => closeModal('groupInfoModal'));
 
 deleteGroupBtn.addEventListener('click', async () => {
-    const confirmed = await showCustomConfirm("Удалить группу навсегда?");
+    const confirmed = await showCustomConfirm("Удалить группу?");
     if(!confirmed) return;
-    try { await deleteDoc(doc(db, "groups", currentChatGroup.id)); closeModal('groupInfoModal'); chatRoom.style.display = 'none'; emptyState.style.display = 'flex'; showToast("Группа удалена", "info"); } catch(e) { showToast(e.message, "error"); }
+    try { await deleteDoc(doc(db, "groups", currentChatGroup.id)); closeModal('groupInfoModal'); resetChatUI(); showToast("Группа удалена", "info"); } catch(e) { showToast(e.message, "error"); }
 });
 
 leaveGroupBtn.addEventListener('click', async () => {
     const confirmed = await showCustomConfirm("Выйти из группы?");
     if(!confirmed) return;
     try {
-        const groupRef = doc(db, "groups", currentChatGroup.id); await updateDoc(groupRef, { members: arrayRemove(auth.currentUser.uid) });
+        await updateDoc(doc(db, "groups", currentChatGroup.id), { members: arrayRemove(auth.currentUser.uid) });
         if (notifyLeaveCheck.checked) { await addDoc(collection(db, "groups", currentChatGroup.id, "messages"), { text: `${auth.currentUser.displayName} покинул группу`, type: 'system', timestamp: serverTimestamp() }); }
-        closeModal('groupInfoModal'); chatRoom.style.display = 'none'; emptyState.style.display = 'flex'; showToast("Вы покинули группу", "info");
+        closeModal('groupInfoModal'); resetChatUI(); showToast("Вы вышли", "info");
     } catch(e) { showToast(e.message, "error"); }
 });
 
 sendBtn.addEventListener('click', sendMessage);
 messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
 
-if (startCallBtn) { startCallBtn.addEventListener('click', () => { if (currentChatType === 'direct') startCall(currentChatUser, false); else if (currentChatType === 'group') startCall(currentChatGroup, true); }); }
-
 initChat();
+initCallSystem();
