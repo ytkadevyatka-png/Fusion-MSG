@@ -148,8 +148,21 @@ html, body {
 .empty-state { width: 100%; height: 100%; display: flex; justify-content: center; align-items: center; color: var(--text-sub); font-weight: 600; opacity: 0.7; }
 .empty-content { text-align: center; }
 
-.chat-room { display: flex; flex-direction: column; height: 100%; width: 100%; }
-.chat-header { height: 70px; min-height: 70px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: var(--glass-border); background: rgba(0,0,0,0.02); }
+/* ИСПРАВЛЕНИЕ #2: Запрет сжатия заголовка */
+.chat-room { display: flex; flex-direction: column; height: 100%; width: 100%; justify-content: flex-start; }
+.chat-header { 
+    height: 70px; 
+    min-height: 70px; 
+    flex: 0 0 70px; /* Фиксируем высоту! */
+    padding: 0 20px; 
+    display: flex; 
+    align-items: center; 
+    justify-content: space-between; 
+    border-bottom: var(--glass-border); 
+    background: rgba(0,0,0,0.02); 
+    position: relative;
+    z-index: 50;
+}
 .header-user-info { display: flex; align-items: center; gap: 10px; flex: 1; margin-left: 10px; overflow: hidden; min-width: 0; }
 .header-avatar img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid var(--glass-border); }
 .chat-title-name { font-weight: 700; font-size: 17px; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -285,34 +298,32 @@ html, body {
 .btn-add-friend { background: var(--primary-color); color: var(--on-primary-text); }
 .btn-remove-friend { background: rgba(255, 77, 77, 0.1); color: #ff4444; }
 
-/* === МОБИЛЬНАЯ ВЕРСИЯ (ИСПРАВЛЕННАЯ) === */
+/* === МОБИЛЬНАЯ ВЕРСИЯ (ИСПРАВЛЕННАЯ ПОЛНОСТЬЮ) === */
 @media (max-width: 768px) {
     .app-layout { position: relative; }
     
     /* 1. Превращаем левую панель в НИЖНЮЮ панель */
     .icon-sidebar {
-        display: flex; /* Показываем! */
-        flex-direction: row; /* Горизонтально */
+        display: flex; 
+        flex-direction: row; 
         position: fixed;
         bottom: 0;
         left: 0;
         width: 100%;
-        height: 60px; /* Высота нижней панели */
+        height: 60px;
         border-right: none;
         border-top: var(--glass-border);
         padding: 0;
-        justify-content: space-around; /* Распределяем кнопки */
+        justify-content: space-around;
         align-items: center;
-        background: var(--modal-bg); /* Фон, чтобы не просвечивало */
+        background: var(--modal-bg);
         z-index: 25;
-        min-width: 0; /* Сброс */
     }
 
-    /* Контейнер кнопок внутри нижней панели */
     .icon-sidebar-top {
         display: flex;
         flex-direction: row;
-        gap: 0; /* Убираем отступы между кнопками, используем space-around */
+        gap: 0; 
         width: 100%;
         justify-content: space-around;
         height: 100%;
@@ -320,7 +331,7 @@ html, body {
     }
 
     .icon-nav-btn {
-        margin-bottom: 0; /* Убираем отступ снизу */
+        margin-bottom: 0; 
         width: 50px;
         height: 50px;
     }
@@ -328,7 +339,7 @@ html, body {
     /* 2. Список чатов на весь экран (минус высота нижней панели) */
     .sidebar {
         width: 100%;
-        height: calc(100dvh - 60px); /* Вычитаем высоту нижней панели */
+        height: calc(100dvh - 60px); 
         position: absolute;
         border: none;
         padding-left: 0;
@@ -344,45 +355,56 @@ html, body {
         height: 100dvh;
         z-index: 30;
         display: none;
-        background: var(--main-bg); /* Чтобы перекрывало нижнюю панель */
+        background: var(--main-bg); 
     }
     
-    /* ИСПРАВЛЕНИЕ: Хедер чата на мобильных не должен ехать */
     .chat-header {
-        padding: 0 10px; /* Меньше отступов по бокам */
+        padding: 0 10px; 
     }
     .header-user-info {
-        min-width: 0; /* Магия флексбокса для сокращения текста */
-        margin-left: 5px; /* Чуть ближе к кнопке "Назад" */
+        min-width: 0; 
+        margin-left: 5px; 
     }
     .chat-title-name {
-        font-size: 15px; /* Чуть меньше шрифт */
+        font-size: 15px; 
     }
     
     /* Когда чат открыт */
     body.mobile-chat-open .sidebar { display: none; }
     body.mobile-chat-open .main-content { display: flex; }
     
-    /* Скрываем нижнюю панель, когда открыт чат (чтобы не мешала вводу) */
+    /* Скрываем нижнюю панель, когда открыт чат */
     body.mobile-chat-open .icon-sidebar { display: none; }
     
     #backToChatsBtn { display: block !important; }
 
-    /* ИСПРАВЛЕНИЕ: Адаптация модалок (Вкладки СЛЕВА, но узкие) */
-    .split-modal-layout { width: 95%; height: 90dvh; flex-direction: row; /* Оставляем РЯДОМ */ }
+    /* ИСПРАВЛЕНИЕ #3: Вкладки СЛЕВА (узкая полоса), контент СПРАВА */
+    .split-modal-layout { 
+        width: 95%; 
+        height: 90dvh; 
+        display: flex !important;
+        flex-direction: row !important; /* Строго горизонтально */
+    }
     .split-sidebar { 
-        width: 60px; /* Узкая полоска */
-        min-width: 60px;
-        padding: 10px 5px;
+        width: 65px !important; /* Фиксированная узкая ширина */
+        min-width: 65px !important;
+        flex-direction: column !important; /* Кнопки одна под другой */
+        padding: 10px 0 !important;
         align-items: center; /* Центрируем иконки */
+        border-right: 1px solid var(--glass-border);
+        background: rgba(0,0,0,0.05); 
     }
     .modal-nav-item {
-        justify-content: center; /* Иконка по центру */
-        padding: 10px;
+        justify-content: center !important; 
+        padding: 15px 0 !important;
+        width: 100%;
+        border-radius: 0 !important;
     }
-    .modal-nav-item span:last-child {
-        display: none; /* Скрываем текст, оставляем только иконку */
+    /* Скрываем текст, оставляем только иконку */
+    .modal-nav-item span:not(.material-symbols-outlined) {
+        display: none !important; 
     }
+    
     .split-content { padding: 15px; }
     
     .group-creation-panel { width: 95%; height: 80dvh; }

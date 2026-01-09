@@ -448,18 +448,33 @@ if(hangupBtn) {
 // === ИСПРАВЛЕНИЕ: Логика микрофона ===
 if(toggleMicBtn) {
     toggleMicBtn.onclick = () => {
-        if (!localStream) return;
-        const audioTrack = localStream.getAudioTracks()[0];
+        // Если стрима нет, пробуем найти его через peerConnection (на случай сбоя переменной)
+        let streamToMute = localStream;
+        
+        // Если локальная переменная пуста, но соединение идет, берем отправителей
+        if (!streamToMute && pc) {
+            const senders = pc.getSenders();
+            const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
+            if (audioSender) streamToMute = new MediaStream([audioSender.track]);
+        }
+
+        if (!streamToMute) {
+            console.warn("Нет аудиопотока для отключения");
+            return;
+        }
+
+        const audioTrack = streamToMute.getAudioTracks()[0];
         if (audioTrack) {
+            // Инвертируем состояние
             audioTrack.enabled = !audioTrack.enabled;
             const isMuted = !audioTrack.enabled;
             
-            // Обновляем UI
+            // Обновляем UI через классы, а не инлайн-стили (надежнее)
             if (isMuted) {
-                toggleMicBtn.style.background = '#ff4444';
+                toggleMicBtn.classList.add('btn-red'); // Делаем красной
                 toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic_off</span>';
             } else {
-                toggleMicBtn.style.background = '';
+                toggleMicBtn.classList.remove('btn-red'); // Возвращаем обычный вид
                 toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
             }
         }
