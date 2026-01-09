@@ -20,6 +20,7 @@ let candidatesQueue = [];
 let activeChatId = null;
 let activeChatType = null;
 let connectionStartTime = null;
+let isCaller = false; // Добавлено для логики мьюта
 
 let audioContext = null;
 let localAnalyser = null;
@@ -63,7 +64,7 @@ function makeDraggable(element) {
 
     function dragMouseDown(e) {
         e = e || window.event;
-        // e.preventDefault(); // Не блокируем скролл, если он нужен, но тут перетаскивание
+        // e.preventDefault(); 
         
         // Определяем координаты (мышь или тач)
         if(e.type === 'touchstart') {
@@ -143,6 +144,7 @@ export function initCallSystem() {
 export async function startCall(targetUserId, targetUserName, targetUserPhoto, chatId, chatType) {
     if (!targetUserId) return;
     resetCallState();
+    isCaller = true; // Мы звоним
     
     activeChatId = chatId; activeChatType = chatType;
 
@@ -170,7 +172,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
         callerPhoto: auth.currentUser.photoURL,
         calleeId: targetUserId,
         createdAt: serverTimestamp(),
-        callerMuted: false,
+        callerMuted: false, // Изначально включен
         calleeMuted: false,
         chatId: chatId,
         chatType: chatType
@@ -188,6 +190,11 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
     const callUnsub = onSnapshot(callDocRef, async (snapshot) => {
         const data = snapshot.data();
         if (!pc || !data) return;
+
+        // Следим за состоянием мьюта собеседника (мы caller, значит смотрим calleeMuted)
+        if (data.calleeMuted !== undefined) {
+             toggleRemoteMuteIcon(data.calleeMuted);
+        }
 
         if (!pc.currentRemoteDescription && data.answer) {
             updateUIState('connecting'); 
@@ -215,6 +222,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
 function showIncomingCall(id, data) {
     resetCallState();
     callDocId = id;
+    isCaller = false; // Нам звонят
     
     activeChatId = data.chatId || null;
     activeChatType = data.chatType || 'direct';
@@ -273,7 +281,7 @@ async function acceptCall(id) {
 
         await updateDoc(doc(db, "calls", id), { 
             answer: { type: answerDescription.type, sdp: answerDescription.sdp },
-            calleeMuted: false
+            calleeMuted: false // Изначально включен
         });
 
         const candUnsub = onSnapshot(collection(db, "calls", id, "offerCandidates"), (snap) => {
@@ -285,6 +293,16 @@ async function acceptCall(id) {
             });
         });
         unsubscribes.push(candUnsub);
+
+        // Слушаем изменения звонка (мьют собеседника)
+        const muteUnsub = onSnapshot(doc(db, "calls", id), (snap) => {
+            const d = snap.data();
+            if (d && d.callerMuted !== undefined) {
+                toggleRemoteMuteIcon(d.callerMuted);
+            }
+        });
+        unsubscribes.push(muteUnsub);
+
         processCandidateQueue();
 
     } catch (err) {
@@ -429,9 +447,12 @@ function resetCallState() {
     if (pc) { pc.close(); pc = null; }
     
     if (toggleMicBtn) {
-        toggleMicBtn.style.background = '';
+        toggleMicBtn.classList.remove('btn-red');
         toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
     }
+
+    // Сброс иконки мьюта
+    if (remoteAvatarContainer) remoteAvatarContainer.classList.remove('muted');
     
     if (voiceLoop) { cancelAnimationFrame(voiceLoop); voiceLoop = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
@@ -445,40 +466,50 @@ if(hangupBtn) {
     });
 }
 
-// === ИСПРАВЛЕНИЕ: Логика микрофона ===
+// === ИСПРАВЛЕНИЕ: Логика микрофона и синхронизация ===
 if(toggleMicBtn) {
-    toggleMicBtn.onclick = () => {
-        // Если стрима нет, пробуем найти его через peerConnection (на случай сбоя переменной)
+    toggleMicBtn.onclick = async () => {
+        // Если стрима нет, пробуем найти его
         let streamToMute = localStream;
-        
-        // Если локальная переменная пуста, но соединение идет, берем отправителей
         if (!streamToMute && pc) {
             const senders = pc.getSenders();
             const audioSender = senders.find(s => s.track && s.track.kind === 'audio');
             if (audioSender) streamToMute = new MediaStream([audioSender.track]);
         }
 
-        if (!streamToMute) {
-            console.warn("Нет аудиопотока для отключения");
-            return;
-        }
+        if (!streamToMute) return;
 
         const audioTrack = streamToMute.getAudioTracks()[0];
         if (audioTrack) {
-            // Инвертируем состояние
+            // Переключаем локально
             audioTrack.enabled = !audioTrack.enabled;
             const isMuted = !audioTrack.enabled;
             
-            // Обновляем UI через классы, а не инлайн-стили (надежнее)
+            // UI
             if (isMuted) {
-                toggleMicBtn.classList.add('btn-red'); // Делаем красной
+                toggleMicBtn.classList.add('btn-red');
                 toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic_off</span>';
             } else {
-                toggleMicBtn.classList.remove('btn-red'); // Возвращаем обычный вид
+                toggleMicBtn.classList.remove('btn-red');
                 toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
+            }
+
+            // Отправляем состояние собеседнику
+            if (callDocId) {
+                const updateField = isCaller ? { callerMuted: isMuted } : { calleeMuted: isMuted };
+                try {
+                    await updateDoc(doc(db, "calls", callDocId), updateField);
+                } catch(e) { console.error("Error syncing mute:", e); }
             }
         }
     };
+}
+
+function toggleRemoteMuteIcon(isMuted) {
+    if (remoteAvatarContainer) {
+        if (isMuted) remoteAvatarContainer.classList.add('muted');
+        else remoteAvatarContainer.classList.remove('muted');
+    }
 }
 
 async function sendCallEndMessage() {
