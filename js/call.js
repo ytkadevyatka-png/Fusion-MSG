@@ -50,37 +50,57 @@ const callControlsRow = document.querySelector('.call-controls-row');
 
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-// === ИСПРАВЛЕНИЕ 5: DRAG & DROP ===
+// === DRAG & DROP ===
 function makeDraggable(element) {
     let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
     const header = element.querySelector('.call-overlay-header');
     
     if (header) {
         header.onmousedown = dragMouseDown;
+        // Добавляем поддержку тача для мобильных
+        header.ontouchstart = dragMouseDown;
     }
 
     function dragMouseDown(e) {
         e = e || window.event;
-        e.preventDefault();
-        // Получаем позицию курсора
-        pos3 = e.clientX;
-        pos4 = e.clientY;
+        // e.preventDefault(); // Не блокируем скролл, если он нужен, но тут перетаскивание
+        
+        // Определяем координаты (мышь или тач)
+        if(e.type === 'touchstart') {
+            pos3 = e.touches[0].clientX;
+            pos4 = e.touches[0].clientY;
+        } else {
+            e.preventDefault();
+            pos3 = e.clientX;
+            pos4 = e.clientY;
+        }
+
         document.onmouseup = closeDragElement;
         document.onmousemove = elementDrag;
+        document.ontouchend = closeDragElement;
+        document.ontouchmove = elementDrag;
     }
 
     function elementDrag(e) {
         e = e || window.event;
-        e.preventDefault();
-        // Вычисляем новую позицию
-        pos1 = pos3 - e.clientX;
-        pos2 = pos4 - e.clientY;
-        pos3 = e.clientX;
-        pos4 = e.clientY;
-        // Устанавливаем положение
+        
+        let clientX, clientY;
+        if(e.type === 'touchmove') {
+            clientX = e.touches[0].clientX;
+            clientY = e.touches[0].clientY;
+        } else {
+            e.preventDefault();
+            clientX = e.clientX;
+            clientY = e.clientY;
+        }
+
+        pos1 = pos3 - clientX;
+        pos2 = pos4 - clientY;
+        pos3 = clientX;
+        pos4 = clientY;
+
         element.style.top = (element.offsetTop - pos2) + "px";
         element.style.left = (element.offsetLeft - pos1) + "px";
-        // Сбрасываем right/bottom, чтобы работало позиционирование top/left
         element.style.right = 'auto';
         element.style.bottom = 'auto';
     }
@@ -88,9 +108,10 @@ function makeDraggable(element) {
     function closeDragElement() {
         document.onmouseup = null;
         document.onmousemove = null;
+        document.ontouchend = null;
+        document.ontouchmove = null;
     }
 }
-// Активируем перетаскивание при загрузке
 if(callOverlay) makeDraggable(callOverlay);
 
 
@@ -127,8 +148,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
 
     if(callOverlay) {
         callOverlay.classList.remove('hidden');
-        callOverlay.classList.remove('minimized'); // Всегда разворачиваем при новом звонке
-        // Сброс позиции в правый нижний угол при новом звонке (опционально)
+        callOverlay.classList.remove('minimized');
         callOverlay.style.top = ''; callOverlay.style.left = ''; callOverlay.style.right = '30px'; callOverlay.style.bottom = '30px';
     }
     
@@ -280,7 +300,7 @@ function createPC() {
     pc.onconnectionstatechange = () => {
         if (pc.connectionState === 'connected') {
             updateUIState('connected');
-            connectionStartTime = Date.now(); // Запоминаем начало разговора
+            connectionStartTime = Date.now(); 
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
             endCallLocally("Связь прервалась");
         }
@@ -404,12 +424,14 @@ function handleMediaError(e) {
 function resetCallState() {
     callDocId = null; candidatesQueue = [];
     connectionStartTime = null; 
-    // НЕ сбрасываем activeChatId здесь, он нужен для сообщения!
     
     if (localStream) localStream.getTracks().forEach(track => track.stop());
     if (pc) { pc.close(); pc = null; }
     
-    if (toggleMicBtn) toggleMicBtn.style.background = '';
+    if (toggleMicBtn) {
+        toggleMicBtn.style.background = '';
+        toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
+    }
     
     if (voiceLoop) { cancelAnimationFrame(voiceLoop); voiceLoop = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
@@ -417,14 +439,33 @@ function resetCallState() {
 
 if(hangupBtn) {
     hangupBtn.addEventListener('click', async () => {
-        // Сначала отправляем сообщение, пока есть данные о чате
         await sendCallEndMessage();
         if (callDocId) await updateDoc(doc(db, "calls", callDocId), { endedAt: serverTimestamp() });
         endCallLocally();
     });
 }
 
-// === ИСПРАВЛЕНИЕ 7: Отправка сообщения ===
+// === ИСПРАВЛЕНИЕ: Логика микрофона ===
+if(toggleMicBtn) {
+    toggleMicBtn.onclick = () => {
+        if (!localStream) return;
+        const audioTrack = localStream.getAudioTracks()[0];
+        if (audioTrack) {
+            audioTrack.enabled = !audioTrack.enabled;
+            const isMuted = !audioTrack.enabled;
+            
+            // Обновляем UI
+            if (isMuted) {
+                toggleMicBtn.style.background = '#ff4444';
+                toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic_off</span>';
+            } else {
+                toggleMicBtn.style.background = '';
+                toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
+            }
+        }
+    };
+}
+
 async function sendCallEndMessage() {
     if (!activeChatId || !auth.currentUser) return;
     
@@ -437,7 +478,6 @@ async function sendCallEndMessage() {
         durationText = `${m}:${s}`;
     }
 
-    // Форматируем время окончания
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
@@ -456,8 +496,6 @@ async function sendCallEndMessage() {
 
 function endCallLocally(msg) {
     if (msg) showToast(msg, "info");
-    
-    // Останавливаем потоки и таймеры
     resetCallState();
     
     if (unsubscribes.length > 1) {
@@ -469,13 +507,11 @@ function endCallLocally(msg) {
     if(remoteAudio) remoteAudio.srcObject = null;
     if(remoteAvatarContainer) remoteAvatarContainer.classList.remove('ringing');
     
-    // === ИСПРАВЛЕНИЕ 6: Скрываем (но логически он остается доступен для след. вызова)
     if(callOverlay) {
         callOverlay.classList.add('hidden');
         callOverlay.classList.remove('minimized');
     }
     
-    // Сбрасываем ID чата только после всего
     activeChatId = null;
     activeChatType = null;
 }

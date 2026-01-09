@@ -150,10 +150,10 @@ html, body {
 
 .chat-room { display: flex; flex-direction: column; height: 100%; width: 100%; }
 .chat-header { height: 70px; min-height: 70px; padding: 0 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: var(--glass-border); background: rgba(0,0,0,0.02); }
-.header-user-info { display: flex; align-items: center; gap: 15px; flex: 1; margin-left: 10px; }
+.header-user-info { display: flex; align-items: center; gap: 10px; flex: 1; margin-left: 10px; overflow: hidden; min-width: 0; }
 .header-avatar img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid var(--glass-border); }
-.chat-title-name { font-weight: 700; font-size: 17px; color: var(--text-color); }
-.header-status-text { font-size: 13px; color: var(--text-sub); font-weight: 500; }
+.chat-title-name { font-weight: 700; font-size: 17px; color: var(--text-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.header-status-text { font-size: 13px; color: var(--text-sub); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 .icon-btn { color: var(--text-color); background: none; border: none; cursor: pointer; display: flex; align-items: center; opacity: 0.9; transition: 0.3s; padding: 8px; border-radius: 50%; }
 .icon-btn:hover { opacity: 1; background: var(--btn-secondary-bg); }
@@ -347,6 +347,18 @@ html, body {
         background: var(--main-bg); /* Чтобы перекрывало нижнюю панель */
     }
     
+    /* ИСПРАВЛЕНИЕ: Хедер чата на мобильных не должен ехать */
+    .chat-header {
+        padding: 0 10px; /* Меньше отступов по бокам */
+    }
+    .header-user-info {
+        min-width: 0; /* Магия флексбокса для сокращения текста */
+        margin-left: 5px; /* Чуть ближе к кнопке "Назад" */
+    }
+    .chat-title-name {
+        font-size: 15px; /* Чуть меньше шрифт */
+    }
+    
     /* Когда чат открыт */
     body.mobile-chat-open .sidebar { display: none; }
     body.mobile-chat-open .main-content { display: flex; }
@@ -356,9 +368,21 @@ html, body {
     
     #backToChatsBtn { display: block !important; }
 
-    /* Адаптация модалок */
-    .split-modal-layout { width: 95%; height: 90dvh; flex-direction: column; }
-    .split-sidebar { width: 100%; height: auto; flex-direction: row; overflow-x: auto; padding: 10px; border-bottom: 1px solid var(--glass-border); border-right: none; min-height: 60px; }
+    /* ИСПРАВЛЕНИЕ: Адаптация модалок (Вкладки СЛЕВА, но узкие) */
+    .split-modal-layout { width: 95%; height: 90dvh; flex-direction: row; /* Оставляем РЯДОМ */ }
+    .split-sidebar { 
+        width: 60px; /* Узкая полоска */
+        min-width: 60px;
+        padding: 10px 5px;
+        align-items: center; /* Центрируем иконки */
+    }
+    .modal-nav-item {
+        justify-content: center; /* Иконка по центру */
+        padding: 10px;
+    }
+    .modal-nav-item span:last-child {
+        display: none; /* Скрываем текст, оставляем только иконку */
+    }
     .split-content { padding: 15px; }
     
     .group-creation-panel { width: 95%; height: 80dvh; }
