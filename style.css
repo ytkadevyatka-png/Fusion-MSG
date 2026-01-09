@@ -66,6 +66,7 @@ html, body {
 @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
 @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 @keyframes toastSlideIn { from { transform: translateX(120%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+@keyframes pulseText { 0% { opacity: 0.5; } 50% { opacity: 1; } 100% { opacity: 0.5; } }
 
 .app-loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: var(--modal-bg); backdrop-filter: blur(20px); z-index: 99999; display: flex; flex-direction: column; justify-content: center; align-items: center; transition: opacity 0.5s ease, visibility 0.5s ease; }
 .app-loader.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
@@ -125,15 +126,16 @@ html, body {
 .sidebar-header h2 { font-weight: 700; color: var(--text-color); margin: 0; }
 
 .chats-list { flex: 1; overflow-y: auto; padding: 10px; -webkit-overflow-scrolling: touch; }
-.chat-user-item { display: flex; align-items: center; padding: 10px; border-radius: 12px; cursor: pointer; transition: 0.2s; margin-bottom: 5px; animation: slideUp 0.3s ease-out both; }
+.chat-user-item { display: flex; align-items: center; padding: 10px; border-radius: 12px; cursor: pointer; transition: 0.2s; margin-bottom: 5px; animation: slideUp 0.3s ease-out both; position: relative; }
 .chat-user-item:hover { background: var(--btn-secondary-bg); }
 .avatar-wrapper { position: relative; margin-right: 12px; }
 .user-avatar-small { width: 48px; height: 48px; border-radius: 50%; object-fit: cover; border: 1px solid var(--glass-border); }
 .status-dot { position: absolute; bottom: 2px; right: 2px; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--modal-bg); }
 .status-online { background: var(--status-online); } .status-busy { background: var(--status-busy); } .status-offline { background: var(--status-offline); }
-.user-info-col { display: flex; flex-direction: column; justify-content: center; overflow: hidden; }
+.user-info-col { display: flex; flex-direction: column; justify-content: center; overflow: hidden; flex: 1; }
 .user-name { font-weight: 700; color: var(--text-color); font-size: 15px; }
 .user-status-text { font-size: 12px; color: var(--text-sub); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; font-weight: 500; }
+.unread-badge { background: #ff4444; color: white; border-radius: 10px; padding: 2px 6px; font-size: 11px; font-weight: bold; margin-left: auto; box-shadow: 0 2px 5px rgba(255, 68, 68, 0.3); }
 
 .sidebar-bottom-wrapper { background: rgba(0,0,0,0.02); border-top: var(--glass-border); padding: 10px; display: flex; flex-direction: column; gap: 8px; margin-top: auto; }
 .user-mini-profile { display: flex; align-items: center; gap: 10px; padding: 5px; border-radius: 10px; cursor: pointer; transition: 0.2s; }
@@ -150,14 +152,13 @@ html, body {
 
 .chat-room { display: flex; flex-direction: column; height: 100%; width: 100%; justify-content: flex-start; }
 
-/* ИСПРАВЛЕНИЕ: ЖЕСТКОЕ ВЫРАВНИВАНИЕ ХЕДЕРА */
 .chat-header { 
     height: 70px; 
     min-height: 70px; 
     flex: 0 0 70px;
     padding: 0 20px; 
     display: flex; 
-    align-items: center; /* Центрирует все по вертикали */
+    align-items: center; 
     justify-content: space-between; 
     border-bottom: var(--glass-border); 
     background: rgba(0,0,0,0.02); 
@@ -165,8 +166,8 @@ html, body {
     z-index: 50;
 }
 .header-left {
-    display: flex; /* КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Выстраивает кнопку и инфо в ряд */
-    align-items: center; /* Центрирует их по вертикали */
+    display: flex;
+    align-items: center;
     min-width: 0;
     flex: 1;
     height: 100%;
@@ -178,17 +179,42 @@ html, body {
 
 .icon-btn { color: var(--text-color); background: none; border: none; cursor: pointer; display: flex; align-items: center; opacity: 0.9; transition: 0.3s; padding: 8px; border-radius: 50%; }
 .icon-btn:hover { opacity: 1; background: var(--btn-secondary-bg); }
+.icon-btn-small { width: 40px; height: 40px; border-radius: 50%; border: none; background: transparent; cursor: pointer; color: var(--text-sub); display: flex; justify-content: center; align-items: center; transition: 0.2s; }
+.icon-btn-small:hover { background: var(--btn-secondary-bg); color: var(--primary-color); }
 
 .messages-list { flex: 1; padding: 20px 40px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
-.message-bubble { max-width: 60%; padding: 12px 18px; border-radius: 18px; font-size: 15px; position: relative; box-shadow: 0 2px 5px rgba(0,0,0,0.05); animation: scaleUp 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+.message-bubble { max-width: 60%; padding: 12px 18px; border-radius: 18px; font-size: 15px; position: relative; box-shadow: 0 2px 5px rgba(0,0,0,0.05); animation: scaleUp 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); word-wrap: break-word; }
 .my-message { align-self: flex-end; background: var(--my-msg-bg); color: var(--my-msg-text); border-bottom-right-radius: 4px; }
 .friend-message { align-self: flex-start; background: var(--friend-msg-bg); color: var(--friend-msg-text); border-bottom-left-radius: 4px; border: 1px solid rgba(127,127,127,0.1); }
 
+/* ИСПРАВЛЕНИЕ: Ограничение размера картинок */
+.msg-image { 
+    max-width: 280px; 
+    max-height: 300px; 
+    width: auto; 
+    height: auto; 
+    border-radius: 12px; 
+    margin-top: 5px; 
+    display: block; 
+    cursor: pointer; 
+    object-fit: contain; 
+}
+
+/* Typing Indicator */
+.typing-indicator { padding: 5px 20px; font-size: 12px; color: var(--text-sub); font-style: italic; animation: pulseText 1.5s infinite; background: rgba(0,0,0,0.02); }
+
 .input-area { padding: 20px; background: rgba(0,0,0,0.02); border-top: var(--glass-border); }
-.input-wrapper { display: flex; gap: 10px; max-width: 1000px; margin: 0 auto; background: var(--input-bg); padding: 5px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: 0.3s; border: 1px solid var(--glass-border); }
-.input-wrapper input { flex: 1; border: none; padding: 12px 20px; border-radius: 30px; font-size: 16px; background: transparent; }
+.input-wrapper { display: flex; gap: 10px; max-width: 1000px; margin: 0 auto; background: var(--input-bg); padding: 5px; border-radius: 30px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); transition: 0.3s; border: 1px solid var(--glass-border); align-items: center; }
+.input-wrapper input[type="text"] { flex: 1; border: none; padding: 12px 15px; border-radius: 30px; font-size: 16px; background: transparent; }
 .input-wrapper input:focus { outline: none; }
-.send-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--primary-color); color: var(--on-primary-text); display: flex; justify-content: center; align-items: center; border: none; cursor: pointer; }
+.send-btn { width: 45px; height: 45px; border-radius: 50%; background: var(--primary-color); color: var(--on-primary-text); display: flex; justify-content: center; align-items: center; border: none; cursor: pointer; flex-shrink: 0; }
+
+/* Context Menu */
+.context-menu { position: fixed; background: var(--modal-bg); border: 1px solid var(--glass-border); border-radius: 12px; padding: 5px; display: none; flex-direction: column; box-shadow: 0 5px 20px rgba(0,0,0,0.2); z-index: 99999; backdrop-filter: blur(10px); }
+.ctx-item { padding: 10px 20px; font-size: 14px; cursor: pointer; display: flex; align-items: center; gap: 10px; border-radius: 8px; color: var(--text-color); transition: 0.2s; }
+.ctx-item:hover { background: var(--btn-secondary-bg); }
+.ctx-danger { color: #ff4444; }
+.ctx-danger:hover { background: rgba(255, 68, 68, 0.1); }
 
 /* === 4. ОКНО ЗВОНКА === */
 .call-overlay {
@@ -208,12 +234,15 @@ html, body {
 .call-participant { display: flex; flex-direction: column; align-items: center; position: relative; }
 .call-participant.remote .avatar-ring-wrapper { width: 80px; height: 80px; }
 .call-participant.local .avatar-ring-wrapper { width: 60px; height: 60px; opacity: 0.8; }
-.avatar-ring-wrapper { position: relative; border-radius: 50%; }
+/* ИСПРАВЛЕНИЕ: Убрали overflow: hidden чтобы кольца выходили за границы */
+.avatar-ring-wrapper { position: relative; border-radius: 50%; } 
 .call-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid #333; z-index: 2; position: relative; }
+/* Видео тоже скругляем, чтобы не вылезало */
+.call-video { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 5; border-radius: 50%; background: #000; -webkit-mask-image: -webkit-radial-gradient(white, black); }
+.call-video.hidden { display: none; }
 
-/* Индикатор выключенного микрофона (УВИДИТ СОБЕСЕДНИК) */
 .avatar-ring-wrapper.muted::after {
-    content: 'mic_off'; /* Код иконки material symbols */
+    content: 'mic_off'; 
     font-family: 'Material Symbols Outlined';
     position: absolute;
     bottom: -5px;
@@ -327,11 +356,10 @@ html, body {
 .btn-add-friend { background: var(--primary-color); color: var(--on-primary-text); }
 .btn-remove-friend { background: rgba(255, 77, 77, 0.1); color: #ff4444; }
 
-/* === МОБИЛЬНАЯ ВЕРСИЯ (ИСПРАВЛЕННАЯ) === */
+/* === МОБИЛЬНАЯ ВЕРСИЯ === */
 @media (max-width: 768px) {
     .app-layout { position: relative; }
     
-    /* 1. Превращаем левую панель в НИЖНЮЮ панель */
     .icon-sidebar {
         display: flex; 
         flex-direction: row; 
@@ -365,7 +393,6 @@ html, body {
         height: 50px;
     }
 
-    /* 2. Список чатов на весь экран (минус высота нижней панели) */
     .sidebar {
         width: 100%;
         height: calc(100dvh - 60px); 
@@ -375,7 +402,6 @@ html, body {
         z-index: 10;
     }
 
-    /* 3. Окно чата (поверх всего) */
     .main-content {
         position: absolute;
         top: 0;
@@ -398,51 +424,46 @@ html, body {
         font-size: 15px; 
     }
     
-    /* Когда чат открыт */
     body.mobile-chat-open .sidebar { display: none; }
     body.mobile-chat-open .main-content { display: flex; }
-    
-    /* Скрываем нижнюю панель, когда открыт чат */
     body.mobile-chat-open .icon-sidebar { display: none; }
     
     #backToChatsBtn { display: block !important; }
 
-    /* ИСПРАВЛЕНИЕ: Вкладки ВНИЗУ, кнопки не сплющены */
     .split-modal-layout { 
         width: 95%; 
         height: 90dvh; 
         display: flex !important;
-        flex-direction: column !important; /* Вкладки и контент вертикально */
+        flex-direction: column !important; 
     }
     .split-sidebar { 
-        width: 100% !important; /* На всю ширину */
+        width: 100% !important; 
         height: auto !important;
         min-height: 50px;
-        flex-direction: row !important; /* Вкладки в ряд */
-        padding: 0 !important; /* УБРАЛ ЛИШНИЕ ОТСТУПЫ */
+        flex-direction: row !important; 
+        padding: 0 !important; 
         align-items: center;
-        justify-content: space-around; /* Равномерно */
+        justify-content: space-around; 
         border-right: none;
         border-top: 1px solid var(--glass-border);
         background: rgba(0,0,0,0.05); 
-        order: 2; /* Вкладки ВНИЗУ */
+        order: 2; 
     }
     .modal-nav-item {
         justify-content: center !important; 
-        padding: 10px 0 !important; /* Только вертикальный паддинг */
-        flex: 1; /* Растягиваем равномерно */
+        padding: 10px 0 !important;
+        flex: 1; 
         border-radius: 0 !important;
         height: 100%;
         margin: 0 !important;
     }
-    /* Скрываем текст, оставляем только иконку */
     .modal-nav-item span:not(.material-symbols-outlined) {
         display: none !important; 
     }
     
     .split-content { 
         padding: 15px; 
-        order: 1; /* Контент СВЕРХУ */
+        order: 1; 
         flex: 1;
     }
     
