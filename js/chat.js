@@ -1,5 +1,5 @@
 import { db, auth } from "./firebase-config.js";
-import { collection, query, onSnapshot, addDoc, serverTimestamp, orderBy, where, doc, getDocs, setDoc, deleteDoc, updateDoc, arrayRemove, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { collection, query, onSnapshot, addDoc, serverTimestamp, orderBy, where, doc, getDocs, setDoc, deleteDoc, updateDoc, arrayRemove, getDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { showToast, openModal, closeModal } from "./toast.js";
 import { initCallSystem, startCall } from "./call.js";
 
@@ -8,12 +8,14 @@ window.updateUserActivity = function(status) {
     if(el) el.textContent = status;
 };
 
+// Переменные состояния
 let currentChatUser = null; 
 let currentChatGroup = null; 
 let currentChatId = null;
 let currentChatType = null;
 let messagesUnsubscribe = null;
 
+// DOM Элементы
 const chatsList = document.getElementById('chatsList');
 const chatRoom = document.getElementById('chatRoom');
 const emptyState = document.getElementById('emptyState');
@@ -25,400 +27,500 @@ const chatHeaderAvatar = document.getElementById('chatHeaderAvatar');
 const chatHeaderStatus = document.getElementById('chatHeaderStatus');
 const chatHeaderInfoArea = document.getElementById('chatHeaderInfoArea');
 const backToChatsBtn = document.getElementById('backToChatsBtn');
-const chatHeader = document.querySelector('.chat-header'); 
 
-const createGroupBtn = document.getElementById('createGroupBtn');
-const confirmCreateGroupBtn = document.getElementById('confirmCreateGroupBtn');
-const usersForGroupList = document.getElementById('usersForGroupList');
-const newGroupName = document.getElementById('newGroupName');
-const closeCreateGroup = document.getElementById('closeCreateGroup');
-const infoGroupName = document.getElementById('infoGroupName');
-const infoGroupCount = document.getElementById('infoGroupCount');
-const deleteGroupBtn = document.getElementById('deleteGroupBtn');
-const leaveGroupBtn = document.getElementById('leaveGroupBtn');
-const notifyLeaveCheck = document.getElementById('notifyLeaveCheck');
-const groupCreatorActions = document.getElementById('groupCreatorActions');
-const groupMemberActions = document.getElementById('groupMemberActions');
-const closeGroupInfo = document.getElementById('closeGroupInfo');
-
+// Кнопки боковой панели
 const friendsBtn = document.getElementById('friendsBtn');
-const closeFriends = document.getElementById('closeFriends');
-const sidebarRequestsBadge = document.getElementById('sidebarRequestsBadge');
-const modalRequestsBadge = document.getElementById('modalRequestsBadge');
-const myFriendsList = document.getElementById('myFriendsList');
-const searchResultsList = document.getElementById('searchResultsList');
-const friendRequestsList = document.getElementById('friendRequestsList');
-const userSearchInput = document.getElementById('userSearchInput');
-const userSearchBtn = document.getElementById('userSearchBtn');
+const createGroupBtn = document.getElementById('createGroupBtn');
+const settingsBtn = document.getElementById('settingsBtn');
 
-const miniProfileAvatar = document.getElementById('miniProfileAvatar');
-const miniProfileName = document.getElementById('miniProfileName');
-const miniProfileStatus = document.getElementById('miniProfileStatus');
-const sidebarUserProfile = document.getElementById('sidebarUserProfile');
+if(friendsBtn) friendsBtn.addEventListener('click', () => {
+    openModal('friendsModal');
+    loadFriendsList(); 
+    loadFriendRequests(); 
+});
+if(createGroupBtn) createGroupBtn.addEventListener('click', () => {
+    openModal('createGroupModal');
+    loadUsersForGroupCreation(); 
+});
+if(settingsBtn) settingsBtn.addEventListener('click', () => openModal('settingsModal'));
 
-const fullProfileAvatar = document.getElementById('fullProfileAvatar');
-const fullProfileName = document.getElementById('fullProfileName');
-const fullProfileEmail = document.getElementById('fullProfileEmail');
-const fullProfileStatusText = document.getElementById('fullProfileStatusText');
-const fullProfileStatusIndicator = document.getElementById('fullProfileStatusIndicator');
-const fullProfileId = document.getElementById('fullProfileId');
-const fullProfileUsername = document.getElementById('fullProfileUsername');
-const closeUserProfile = document.getElementById('closeUserProfile');
 
-let myFriendsData = [];
-let allGroupsData = [];
-let friendListenersUnsubscribers = [];
+// === ОСНОВНАЯ ЛОГИКА ===
+auth.onAuthStateChanged(async (user) => {
+    if (!user) {
+        chatRoom.style.display = 'none';
+        emptyState.style.display = 'flex';
+        return;
+    }
 
-if (backToChatsBtn) {
-    backToChatsBtn.addEventListener('click', () => {
-        document.body.classList.remove('mobile-chat-open');
-        currentChatId = null;
-    });
-}
+    initCallSystem();
 
-function setupFriendListeners(friendUids) {
-    friendListenersUnsubscribers.forEach(unsub => unsub());
-    friendListenersUnsubscribers = [];
-    myFriendsData = [];
-
-    if (friendUids.length === 0) { renderChatList(); return; }
-
-    friendUids.forEach(uid => {
-        const unsub = onSnapshot(doc(db, "users", uid), (docSnap) => {
-            if (docSnap.exists()) {
-                const userData = docSnap.data();
-                const friendObj = { ...userData, uid: uid };
-                const index = myFriendsData.findIndex(u => u.uid === uid);
-                if (index !== -1) { myFriendsData[index] = friendObj; } else { myFriendsData.push(friendObj); }
-            } else {
-                const index = myFriendsData.findIndex(u => u.uid === uid);
-                if (index !== -1) { myFriendsData[index] = { uid: uid, displayName: "Аккаунт удален", status: "deleted", photoURL: "https://cdn-icons-png.flaticon.com/512/847/847969.png" }; }
-            }
-            renderChatList();
-            if (currentChatType === 'direct' && currentChatUser && currentChatUser.uid === uid) {
-                const user = myFriendsData.find(u => u.uid === uid);
-                updateChatHeader(user.displayName, user.photoURL, user.status);
-            }
-        });
-        friendListenersUnsubscribers.push(unsub);
-    });
-}
-
-function showCustomConfirm(msg) {
-    return new Promise((resolve) => {
-        const text = document.getElementById('confirmMessage');
-        const yesBtn = document.getElementById('confirmOkBtn');
-        const noBtn = document.getElementById('confirmCancelBtn');
-        text.textContent = msg;
-        openModal('customConfirmModal');
-        const newYes = yesBtn.cloneNode(true); const newNo = noBtn.cloneNode(true);
-        yesBtn.parentNode.replaceChild(newYes, yesBtn); noBtn.parentNode.replaceChild(newNo, noBtn);
-        newYes.onclick = () => { closeModal('customConfirmModal'); resolve(true); };
-        newNo.onclick = () => { closeModal('customConfirmModal'); resolve(false); };
-    });
-}
-
-export function initChat() {
-    auth.onAuthStateChanged(async (user) => {
-        if (!user) { chatsList.innerHTML = '<div class="loading-text">Войдите в аккаунт</div>'; return; }
+    // ЗАГРУЗКА ЧАТОВ
+    const q = query(collection(db, "users", user.uid, "chats"), orderBy("lastMessageTime", "desc"));
+    
+    onSnapshot(q, async (snapshot) => {
+        chatsList.innerHTML = '';
         
-        try { await updateDoc(doc(db, "users", user.uid), { status: 'online' }); } catch(e) {}
-
-        if(miniProfileAvatar) miniProfileAvatar.src = user.photoURL;
-        if(miniProfileName) miniProfileName.textContent = user.displayName;
-        if(miniProfileStatus) miniProfileStatus.textContent = "В сети";
-
-        if(sidebarUserProfile) {
-            sidebarUserProfile.addEventListener('click', () => {
-                openModal('currentUserProfileModal');
-                if(fullProfileAvatar) fullProfileAvatar.src = user.photoURL;
-                if(fullProfileName) fullProfileName.textContent = user.displayName;
-                if(fullProfileEmail) fullProfileEmail.textContent = user.email;
-                if(fullProfileId) fullProfileId.textContent = user.uid;
-                
-                getDoc(doc(db, "users", user.uid)).then(d => {
-                    if(d.exists()) {
-                        const data = d.data();
-                        if(fullProfileUsername) fullProfileUsername.textContent = data.username ? `@${data.username}` : '';
-                        const st = data.status;
-                        let stText = st === 'online' ? 'В сети' : (st === 'busy' ? 'Не беспокоить' : 'Невидимка');
-                        fullProfileStatusText.textContent = stText;
-                        fullProfileStatusIndicator.className = `status-indicator ${st}`;
-                    }
-                });
-            });
+        if (snapshot.empty) {
+            chatsList.innerHTML = '<div style="text-align:center; padding:20px; color:#888; font-size: 14px;">Нет чатов</div>';
+            return;
         }
-        if(closeUserProfile) closeUserProfile.addEventListener('click', () => closeModal('currentUserProfileModal'));
 
-        onSnapshot(collection(db, "users", user.uid, "friends"), (snapshot) => {
-            const friendUids = snapshot.docs.map(d => d.id);
-            setupFriendListeners(friendUids);
-        });
+        for (const d of snapshot.docs) {
+            const chatData = d.data();
+            const chatId = d.id;
+            
+            if (chatData.type === 'direct') {
+                const partnerId = chatData.partnerId;
+                onSnapshot(doc(db, "users", partnerId), (userSnap) => {
+                    const userData = userSnap.data();
+                    if (!userData) return;
+                    
+                    let chatItem = document.getElementById(`chat-item-${chatId}`);
+                    if (!chatItem) {
+                        chatItem = document.createElement('div');
+                        chatItem.id = `chat-item-${chatId}`;
+                        chatItem.className = 'chat-user-item';
+                        chatItem.onclick = () => openChat(chatId, 'direct', userData);
+                        chatsList.appendChild(chatItem); 
+                    }
+                    
+                    let statusColor = '#666'; 
+                    let statusText = 'Не в сети';
+                    if(userData.status === 'online') { statusColor = '#00b34a'; statusText = 'В сети'; }
+                    else if(userData.status === 'busy') { statusColor = '#ff9800'; statusText = 'Занят'; }
 
-        try {
-            const qGroups = query(collection(db, "groups"), where("members", "array-contains", user.uid));
-            onSnapshot(qGroups, (snapshot) => { 
-                allGroupsData = []; 
-                snapshot.forEach(doc => allGroupsData.push({ id: doc.id, ...doc.data() })); 
-                renderChatList(); 
-            }, (error) => {
-                console.error("Ошибка групп:", error);
-                chatsList.innerHTML = '<div style="padding:20px;text-align:center;font-size:12px;color:red">Ошибка доступа или индекса.</div>';
-            });
-        } catch(e) { console.error("Group Query Error:", e); }
-        
-        const qRequests = query(collection(db, "friend_requests"), where("to", "==", user.uid), where("status", "==", "pending"));
-        onSnapshot(qRequests, (snapshot) => {
-            const count = snapshot.docs.length;
-            if (count > 0) { 
-                if(sidebarRequestsBadge) sidebarRequestsBadge.style.display = 'block'; 
-                if(modalRequestsBadge) { modalRequestsBadge.style.display = 'inline-flex'; modalRequestsBadge.textContent = count; }
-            } else { 
-                if(sidebarRequestsBadge) sidebarRequestsBadge.style.display = 'none'; 
-                if(modalRequestsBadge) modalRequestsBadge.style.display = 'none'; 
+                    chatItem.innerHTML = `
+                        <div class="avatar-wrapper">
+                            <img src="${userData.photoURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}" class="user-avatar-small">
+                            <div class="status-dot" style="background:${statusColor}"></div>
+                        </div>
+                        <div class="user-info-col">
+                            <div class="user-name">${userData.displayName}</div>
+                            <div class="user-status-text">${statusText}</div>
+                        </div>
+                    `;
+                });
+            } 
+            else if (chatData.type === 'group') {
+                const groupId = chatData.groupId;
+                onSnapshot(doc(db, "groups", groupId), (groupSnap) => {
+                    const groupData = groupSnap.data();
+                    if (!groupData) return;
+
+                    let chatItem = document.getElementById(`chat-item-${chatId}`);
+                    if (!chatItem) {
+                        chatItem = document.createElement('div');
+                        chatItem.id = `chat-item-${chatId}`;
+                        chatItem.className = 'chat-user-item';
+                        chatItem.onclick = () => openChat(chatId, 'group', groupData);
+                        chatsList.appendChild(chatItem);
+                    }
+
+                    chatItem.innerHTML = `
+                        <div class="avatar-wrapper">
+                            <div class="user-avatar-small" style="background:#007bff; display:flex; justify-content:center; align-items:center; color:white;">
+                                <span class="material-symbols-outlined">groups</span>
+                            </div>
+                        </div>
+                        <div class="user-info-col">
+                            <div class="user-name">${groupData.name}</div>
+                            <div class="user-status-text">${groupData.members ? groupData.members.length : 0} участников</div>
+                        </div>
+                    `;
+                });
             }
-            renderFriendRequests(snapshot.docs);
-        });
-    });
-}
-
-function renderChatList() {
-    chatsList.innerHTML = '';
-    allGroupsData.forEach(group => {
-        const item = document.createElement('div'); item.className = 'chat-user-item';
-        item.innerHTML = `<div class="avatar-wrapper"><img src="https://cdn-icons-png.flaticon.com/512/681/681494.png" class="user-avatar-small"></div><div class="user-info-col"><div class="user-name">${group.name}</div><div class="user-status-text">Группа • ${group.members.length} уч.</div></div>`;
-        item.addEventListener('click', () => openChat(group, 'group')); 
-        chatsList.appendChild(item);
+        }
     });
 
-    myFriendsData.forEach(user => {
-        let statusClass = 'status-offline';
-        if (user.status === 'online') statusClass = 'status-online';
-        else if (user.status === 'busy') statusClass = 'status-busy';
-        else if (user.status === 'deleted') statusClass = 'status-deleted';
-        
-        let statusText = user.customStatusText || (user.status === 'online' ? 'В сети' : (user.status === 'busy' ? 'Не беспокоить' : 'Не в сети'));
-        if (user.status === 'deleted') statusText = "Аккаунт удален";
-
-        const item = document.createElement('div'); item.className = 'chat-user-item';
-        item.innerHTML = `<div class="avatar-wrapper"><img src="${user.photoURL}" class="user-avatar-small"><div class="status-dot ${statusClass}"></div></div><div class="user-info-col"><div class="user-name">${user.displayName}</div><div class="user-status-text">${statusText}</div></div>`;
-        item.addEventListener('click', () => { if(user.status !== 'deleted') openChat(user, 'direct'); else showToast("Этот аккаунт удален", "error"); }); 
-        chatsList.appendChild(item);
-    });
+    const miniProfileAvatar = document.getElementById('miniProfileAvatar');
+    const miniProfileName = document.getElementById('miniProfileName');
+    const miniProfileStatus = document.getElementById('miniProfileStatus'); 
     
-    if (allGroupsData.length === 0 && myFriendsData.length === 0) {
-        chatsList.innerHTML = '<div style="text-align:center; padding:20px; color:var(--text-sub); font-size:14px;">Нет чатов.<br>Найдите друзей через поиск!</div>';
+    if(miniProfileAvatar) miniProfileAvatar.src = user.photoURL || "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+    if(miniProfileName) miniProfileName.textContent = user.displayName;
+    if(miniProfileStatus) { miniProfileStatus.textContent = "В сети"; miniProfileStatus.style.color = "#00b34a"; }
+
+    const sidebarUserProfile = document.getElementById('sidebarUserProfile');
+    if(sidebarUserProfile) {
+        sidebarUserProfile.addEventListener('click', () => {
+             openModal('currentUserProfileModal');
+             const fpName = document.getElementById('fullProfileName');
+             const fpEmail = document.getElementById('fullProfileEmail');
+             const fpId = document.getElementById('fullProfileId');
+             const fpAvatar = document.getElementById('fullProfileAvatar');
+             const fpUsername = document.getElementById('fullProfileUsername');
+
+             if(fpName) fpName.textContent = user.displayName;
+             if(fpEmail) fpEmail.textContent = user.email;
+             if(fpId) fpId.textContent = user.uid;
+             if(fpAvatar) fpAvatar.src = user.photoURL || "https://cdn-icons-png.flaticon.com/512/847/847969.png";
+             
+             getDoc(doc(db, "users", user.uid)).then(snap => {
+                 if(snap.exists() && fpUsername) {
+                     fpUsername.textContent = "@" + (snap.data().username || "user");
+                 }
+             });
+        });
     }
-}
+});
 
-function resetChatUI() {
-    chatRoom.style.display = 'none'; emptyState.style.display = 'flex';
-    document.body.classList.remove('mobile-chat-open');
-    currentChatId = null; currentChatUser = null; currentChatGroup = null;
-    if(window.updateUserActivity) window.updateUserActivity("В меню");
-}
-
-let activeChatUserUnsubscribe = null; 
-
-// js/chat.js (Частичное обновление или замена функции openChat)
-
-function openChat(target, type) {
-    if (activeChatUserUnsubscribe) { activeChatUserUnsubscribe(); activeChatUserUnsubscribe = null; }
-
-    currentChatType = type; 
-    if(window.updateUserActivity) window.updateUserActivity(`В чате: ${type === 'direct' ? target.displayName : target.name}`);
+async function openChat(chatId, type, data) {
+    currentChatId = chatId;
+    currentChatType = type;
+    
     document.body.classList.add('mobile-chat-open');
-
-    if (type === 'direct') {
-        currentChatUser = target; currentChatGroup = null; 
-        const ids = [auth.currentUser.uid, target.uid].sort(); 
-        currentChatId = ids[0] + "_" + ids[1];
-        updateChatHeader(target.displayName, target.photoURL, target.status);
-        const userDocRef = doc(db, "users", target.uid);
-        activeChatUserUnsubscribe = onSnapshot(userDocRef, (docSnap) => {
-            if (!docSnap.exists()) { showToast("Пользователь удален", "info"); resetChatUI(); }
-        });
-    } else {
-        currentChatGroup = target; currentChatUser = null; currentChatId = target.id;
-        updateChatHeader(target.name, "https://cdn-icons-png.flaticon.com/512/681/681494.png", 'group');
-        const groupDocRef = doc(db, "groups", target.id);
-        activeChatUserUnsubscribe = onSnapshot(groupDocRef, (docSnap) => {
-             if (!docSnap.exists()) { showToast("Группа удалена", "info"); resetChatUI(); }
-        });
-    }
+    emptyState.style.display = 'none';
+    chatRoom.style.display = 'flex';
     
-    // [ИЗМЕНЕНО] Логика кнопки звонка
-    const oldCallBtn = document.getElementById('headerCallBtn');
-    if (oldCallBtn) oldCallBtn.remove();
+    messagesList.innerHTML = '';
+    if (messagesUnsubscribe) messagesUnsubscribe();
+
+    // ИСПРАВЛЕНИЕ: Ищем контейнер в шапке
+    const headerRight = document.querySelector('.chat-header .header-right');
+    const oldCall = document.getElementById('headerCallBtn');
+    if(oldCall) oldCall.remove(); 
 
     if (type === 'direct') {
+        currentChatUser = data;
+        currentChatGroup = null;
+        chatTitle.textContent = data.displayName;
+        chatHeaderAvatar.innerHTML = `<img src="${data.photoURL || 'https://cdn-icons-png.flaticon.com/512/847/847969.png'}">`;
+        
         const callBtn = document.createElement('button');
         callBtn.id = 'headerCallBtn';
         callBtn.className = 'icon-btn';
         callBtn.innerHTML = '<span class="material-symbols-outlined">call</span>';
-        callBtn.style.marginLeft = '10px';
         callBtn.title = "Позвонить";
+        callBtn.onclick = () => startCall(data.uid, data.displayName, data.photoURL, chatId, 'direct');
         
-        callBtn.onclick = () => {
-            // [ВАЖНО] Теперь передаем currentChatId и currentChatType
-            startCall(target.uid, target.displayName, target.photoURL, currentChatId, currentChatType);
-        };
+        // Вставляем кнопку звонка
+        if(headerRight) headerRight.appendChild(callBtn);
 
-        chatHeader.appendChild(callBtn);
+        onSnapshot(doc(db, "users", data.uid), (snap) => {
+            const d = snap.data();
+            if(d) {
+                chatHeaderStatus.textContent = d.status === 'online' ? 'В сети' : (d.status === 'busy' ? 'Занят' : 'Не в сети');
+            }
+        });
+
+    } else {
+        currentChatGroup = data;
+        currentChatUser = null;
+        chatTitle.textContent = data.name;
+        chatHeaderAvatar.innerHTML = `<div style="width:40px;height:40px;background:#007bff;border-radius:50%;display:flex;justify-content:center;align-items:center;color:white;"><span class="material-symbols-outlined">groups</span></div>`;
+        chatHeaderStatus.textContent = `${data.members ? data.members.length : 0} участников`;
     }
+
+    const collectionName = type === 'direct' ? 'chats' : 'groups';
+    const q = query(collection(db, collectionName, chatId, "messages"), orderBy("timestamp", "asc"));
     
-    emptyState.style.display = 'none'; chatRoom.style.display = 'flex'; messagesList.innerHTML = ''; loadMessages();
-}
-
-function updateChatHeader(name, photo, status) {
-    chatTitle.textContent = name; chatHeaderAvatar.innerHTML = `<img src="${photo}">`;
-    if (status === 'group') { chatHeaderStatus.textContent = 'Группа'; chatHeaderStatus.style.color = 'var(--text-sub)'; } 
-    else { 
-        if (status === 'online') { chatHeaderStatus.textContent = 'В сети'; chatHeaderStatus.style.color = '#2cc069'; }
-        else if (status === 'busy') { chatHeaderStatus.textContent = 'Не беспокоить'; chatHeaderStatus.style.color = '#ff4444'; }
-        else { chatHeaderStatus.textContent = 'Не в сети'; chatHeaderStatus.style.color = 'var(--text-sub)'; }
-    }
-}
-
-async function sendMessage() {
-    const text = messageInput.value; if (text.trim() === '' || !currentChatId) return;
-    let collectionRef = currentChatType === 'direct' ? collection(db, "chats", currentChatId, "messages") : collection(db, "groups", currentChatId, "messages");
-    try { await addDoc(collectionRef, { text: text, senderId: auth.currentUser.uid, senderName: auth.currentUser.displayName, timestamp: serverTimestamp() }); messageInput.value = ''; } catch (error) { console.error(error); showToast("Ошибка отправки", "error"); }
-}
-
-function loadMessages() {
-    if (messagesUnsubscribe) messagesUnsubscribe();
-    let collectionRef = currentChatType === 'direct' ? collection(db, "chats", currentChatId, "messages") : collection(db, "groups", currentChatId, "messages");
-    const q = query(collectionRef, orderBy("timestamp", "asc"));
     messagesUnsubscribe = onSnapshot(q, (snapshot) => {
-        messagesList.innerHTML = ''; 
+        messagesList.innerHTML = '';
         snapshot.forEach((doc) => {
-            const msg = doc.data(); const isMe = msg.senderId === auth.currentUser.uid;
-            if (msg.type === 'system') { const sysDiv = document.createElement('div'); sysDiv.style.textAlign='center'; sysDiv.style.fontSize='12px'; sysDiv.style.color='#888'; sysDiv.textContent = msg.text; messagesList.appendChild(sysDiv); return; }
-            const msgDiv = document.createElement('div'); msgDiv.className = `message-bubble ${isMe ? 'my-message' : 'friend-message'}`;
-            if (currentChatType === 'group' && !isMe) { const nameLabel = document.createElement('div'); nameLabel.style.fontSize = '11px'; nameLabel.style.color = '#888'; nameLabel.textContent = msg.senderName; msgDiv.appendChild(nameLabel); }
-            const textNode = document.createElement('div'); textNode.textContent = msg.text; msgDiv.appendChild(textNode); messagesList.appendChild(msgDiv);
+            renderMessage(doc.data(), doc.id);
         });
-        messagesList.scrollTop = messagesList.scrollHeight;
-    }, (error) => console.log("Msg error (ignore if new chat)"));
-}
-
-if(friendsBtn) friendsBtn.addEventListener('click', () => { openModal('friendsModal'); renderMyFriendsList(); });
-if(closeFriends) closeFriends.addEventListener('click', () => closeModal('friendsModal'));
-
-userSearchBtn.addEventListener('click', async () => {
-    const queryText = userSearchInput.value.trim(); if (!queryText) return;
-    searchResultsList.innerHTML = '<div style="padding:10px;">Поиск...</div>';
-    let q;
-    if (queryText.startsWith('@')) { q = query(collection(db, "users"), where("username", "==", queryText.substring(1))); } 
-    else { q = query(collection(db, "users"), where("displayName", ">=", queryText), where("displayName", "<=", queryText + "\uf8ff")); }
-    try {
-        const snapshot = await getDocs(q);
-        searchResultsList.innerHTML = '';
-        if (snapshot.empty) { searchResultsList.innerHTML = '<div style="padding:10px;">Никого не найдено</div>'; return; }
-        snapshot.forEach(docSnap => {
-            const userData = docSnap.data(); const user = { ...userData, uid: docSnap.id }; 
-            if (user.uid === auth.currentUser.uid) return;
-            const isFriend = myFriendsData.some(f => f.uid === user.uid);
-            const card = document.createElement('div'); card.className = 'friend-card';
-            card.innerHTML = `<img src="${user.photoURL}"><div class="friend-name">${user.displayName} <span style='font-size:11px;color:#888'>@${user.username||''}</span></div>${!isFriend ? `<button class="btn-add-friend" data-uid="${user.uid}">Добавить</button>` : '<span style="font-size:12px;color:green;">Друзья</span>'}`;
-            if (!isFriend) card.querySelector('.btn-add-friend').addEventListener('click', () => sendFriendRequest(user));
-            searchResultsList.appendChild(card);
-        });
-    } catch(e) { searchResultsList.innerHTML = '<div style="padding:10px; color:red;">Ошибка поиска (нужен индекс?)</div>'; console.error(e); }
-});
-
-async function sendFriendRequest(targetUser) {
-    try { 
-        const checkQ = query(collection(db, "friend_requests"), where("from", "==", auth.currentUser.uid), where("to", "==", targetUser.uid));
-        const checkSnap = await getDocs(checkQ);
-        if (!checkSnap.empty) { return showToast("Заявка уже отправлена", "info"); }
-        await addDoc(collection(db, "friend_requests"), { from: auth.currentUser.uid, to: targetUser.uid, fromName: auth.currentUser.displayName, fromPhoto: auth.currentUser.photoURL, status: 'pending', timestamp: serverTimestamp() }); 
-        showToast("Заявка отправлена", "success"); 
-    } catch (e) { showToast("Ошибка: " + e.message, "error"); }
-}
-
-function renderFriendRequests(docs) {
-    friendRequestsList.innerHTML = '';
-    if (docs.length === 0) { friendRequestsList.innerHTML = '<div style="padding:10px; color:var(--text-sub);">Нет новых заявок</div>'; return; }
-    docs.forEach(d => {
-        const req = d.data(); const card = document.createElement('div'); card.className = 'request-card';
-        card.innerHTML = `<div class="req-info"><img src="${req.fromPhoto}"><span><b>${req.fromName}</b> хочет добавить вас</span></div><div class="req-actions"><button class="btn-accept"><span class="material-symbols-outlined">check</span></button><button class="btn-reject"><span class="material-symbols-outlined">close</span></button></div>`;
-        card.querySelector('.btn-accept').addEventListener('click', () => acceptFriend(d.id, req)); card.querySelector('.btn-reject').addEventListener('click', () => rejectFriend(d.id));
-        friendRequestsList.appendChild(card);
+        scrollToBottom();
     });
 }
 
-async function acceptFriend(reqId, reqData) {
-    try { await setDoc(doc(db, "users", auth.currentUser.uid, "friends", reqData.from), { uid: reqData.from }); await setDoc(doc(db, "users", reqData.from, "friends", auth.currentUser.uid), { uid: auth.currentUser.uid }); await deleteDoc(doc(db, "friend_requests", reqId)); showToast("Друг добавлен!", "success"); } catch(e) { showToast(e.message, "error"); }
-}
-async function rejectFriend(reqId) { try { await deleteDoc(doc(db, "friend_requests", reqId)); } catch(e){} }
-
-function renderMyFriendsList() {
-    myFriendsList.innerHTML = '';
-    myFriendsData.forEach(user => {
-        if(user.status === 'deleted') return; 
-        const card = document.createElement('div'); card.className = 'friend-card';
-        card.innerHTML = `<img src="${user.photoURL}"><div class="friend-name">${user.displayName}</div><button class="btn-remove-friend">Удалить</button>`;
-        card.querySelector('.btn-remove-friend').addEventListener('click', () => removeFriend(user.uid));
-        myFriendsList.appendChild(card);
-    });
-}
-
-async function removeFriend(friendUid) {
-    const confirmed = await showCustomConfirm("Удалить пользователя из друзей?");
-    if(!confirmed) return;
-    try { await deleteDoc(doc(db, "users", auth.currentUser.uid, "friends", friendUid)); await deleteDoc(doc(db, "users", friendUid, "friends", auth.currentUser.uid)); showToast("Удален", "info"); } catch (e) { showToast(e.message, "error"); }
-}
-
-if(createGroupBtn) createGroupBtn.addEventListener('click', () => { openModal('createGroupModal'); loadUsersForGroup(); });
-if(closeCreateGroup) closeCreateGroup.addEventListener('click', () => closeModal('createGroupModal'));
-
-function loadUsersForGroup() {
-    usersForGroupList.innerHTML = '';
-    myFriendsData.forEach(user => {
-        if(user.status === 'deleted') return;
-        const card = document.createElement('div'); card.className = 'grid-user-card'; const checkboxId = `user_cb_${user.uid}`;
-        card.innerHTML = `<input type="checkbox" value="${user.uid}" id="${checkboxId}" class="hidden-checkbox"><img src="${user.photoURL}" class="grid-avatar"><div class="grid-name">${user.displayName}</div><div class="grid-check"><span class="material-symbols-outlined">check</span></div>`;
-        card.addEventListener('click', () => { const cb = card.querySelector('.hidden-checkbox'); cb.checked = !cb.checked; if (cb.checked) card.classList.add('selected'); else card.classList.remove('selected'); });
-        usersForGroupList.appendChild(card);
-    });
-}
-
-confirmCreateGroupBtn.addEventListener('click', async () => {
-    const name = newGroupName.value; const checkboxes = document.querySelectorAll('.hidden-checkbox:checked'); const members = [auth.currentUser.uid];
-    checkboxes.forEach(cb => members.push(cb.value));
-    if (!name) return showToast("Введите название", "error"); if (members.length < 2) return showToast("Выберите участников", "error");
-    try { await addDoc(collection(db, "groups"), { name: name, members: members, createdBy: auth.currentUser.uid, createdAt: serverTimestamp() }); showToast("Группа создана!", "success"); closeModal('createGroupModal'); newGroupName.value = ''; } catch (e) { showToast("Ошибка: " + e.message, "error"); }
-});
-
-chatHeaderInfoArea.addEventListener('click', () => {
-    if (currentChatType === 'group' && currentChatGroup) {
-        openModal('groupInfoModal'); infoGroupName.textContent = currentChatGroup.name; infoGroupCount.textContent = `${currentChatGroup.members.length} участников`;
-        if (currentChatGroup.createdBy === auth.currentUser.uid) { groupCreatorActions.style.display = 'block'; groupMemberActions.style.display = 'none'; } 
-        else { groupCreatorActions.style.display = 'none'; groupMemberActions.style.display = 'block'; }
+function renderMessage(msg, id) {
+    const div = document.createElement('div');
+    const isMe = msg.senderId === auth.currentUser.uid;
+    
+    if (msg.type === 'system') {
+        div.className = 'message-bubble system-message';
+        div.style.alignSelf = 'center';
+        div.style.background = 'rgba(127,127,127,0.2)';
+        div.style.fontSize = '12px';
+        div.style.color = 'var(--text-sub)';
+        div.style.borderRadius = '10px';
+        div.style.padding = '5px 10px';
+        div.style.boxShadow = 'none';
+        div.textContent = msg.text;
+    } else {
+        div.className = `message-bubble ${isMe ? 'my-message' : 'friend-message'}`;
+        div.textContent = msg.text;
     }
-});
-if(closeGroupInfo) closeGroupInfo.addEventListener('click', () => closeModal('groupInfoModal'));
+    messagesList.appendChild(div);
+}
 
-deleteGroupBtn.addEventListener('click', async () => {
-    const confirmed = await showCustomConfirm("Удалить группу?");
-    if(!confirmed) return;
-    try { await deleteDoc(doc(db, "groups", currentChatGroup.id)); closeModal('groupInfoModal'); resetChatUI(); showToast("Группа удалена", "info"); } catch(e) { showToast(e.message, "error"); }
-});
-
-leaveGroupBtn.addEventListener('click', async () => {
-    const confirmed = await showCustomConfirm("Выйти из группы?");
-    if(!confirmed) return;
-    try {
-        await updateDoc(doc(db, "groups", currentChatGroup.id), { members: arrayRemove(auth.currentUser.uid) });
-        if (notifyLeaveCheck.checked) { await addDoc(collection(db, "groups", currentChatGroup.id, "messages"), { text: `${auth.currentUser.displayName} покинул группу`, type: 'system', timestamp: serverTimestamp() }); }
-        closeModal('groupInfoModal'); resetChatUI(); showToast("Вы вышли", "info");
-    } catch(e) { showToast(e.message, "error"); }
-});
+function scrollToBottom() {
+    messagesList.scrollTop = messagesList.scrollHeight;
+}
 
 sendBtn.addEventListener('click', sendMessage);
-messageInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') sendMessage(); });
+messageInput.addEventListener('keypress', (e) => { if(e.key === 'Enter') sendMessage(); });
 
-initChat();
-initCallSystem();
+async function sendMessage() {
+    const text = messageInput.value.trim();
+    if (!text || !currentChatId) return;
+    
+    messageInput.value = ''; 
+    const collectionName = currentChatType === 'direct' ? 'chats' : 'groups';
+    
+    try {
+        await addDoc(collection(db, collectionName, currentChatId, "messages"), {
+            text: text,
+            senderId: auth.currentUser.uid,
+            timestamp: serverTimestamp(),
+            type: 'text'
+        });
+        
+        if (currentChatType === 'direct') {
+            await updateDoc(doc(db, "users", auth.currentUser.uid, "chats", currentChatId), { lastMessageTime: serverTimestamp() });
+        }
+    } catch (e) {
+        showToast("Ошибка отправки: " + e.message, "error");
+    }
+}
+
+if(backToChatsBtn) {
+    backToChatsBtn.addEventListener('click', () => {
+        document.body.classList.remove('mobile-chat-open');
+    });
+}
+
+chatHeaderInfoArea.addEventListener('click', () => {
+    if(currentChatType === 'group' && currentChatGroup) {
+        openModal('groupInfoModal');
+        const infoGroupName = document.getElementById('infoGroupName');
+        const infoGroupCount = document.getElementById('infoGroupCount');
+        
+        if(infoGroupName) infoGroupName.textContent = currentChatGroup.name;
+        if(infoGroupCount) infoGroupCount.textContent = `${currentChatGroup.members ? currentChatGroup.members.length : 0} участников`;
+        
+        const deleteGroupBtn = document.getElementById('deleteGroupBtn');
+        const leaveGroupBtn = document.getElementById('leaveGroupBtn');
+        const groupCreatorActions = document.getElementById('groupCreatorActions');
+        const groupMemberActions = document.getElementById('groupMemberActions');
+        
+        if(currentChatGroup.owner === auth.currentUser.uid) {
+            groupCreatorActions.style.display = 'block';
+            groupMemberActions.style.display = 'none';
+        } else {
+            groupCreatorActions.style.display = 'none';
+            groupMemberActions.style.display = 'block';
+        }
+
+        deleteGroupBtn.onclick = async () => {
+            if(confirm("Удалить группу?")) {
+                await deleteDoc(doc(db, "groups", currentChatId));
+                closeModal('groupInfoModal');
+                chatRoom.style.display = 'none'; emptyState.style.display = 'flex';
+                showToast("Группа удалена", "info");
+            }
+        };
+        leaveGroupBtn.onclick = async () => {
+            if(confirm("Выйти из группы?")) {
+                await updateDoc(doc(db, "groups", currentChatId), { members: arrayRemove(auth.currentUser.uid) });
+                await deleteDoc(doc(db, "users", auth.currentUser.uid, "chats", currentChatId));
+                closeModal('groupInfoModal');
+                chatRoom.style.display = 'none'; emptyState.style.display = 'flex';
+                showToast("Вы вышли", "info");
+            }
+        };
+    }
+});
+
+const userSearchInput = document.getElementById('userSearchInput');
+const userSearchBtn = document.getElementById('userSearchBtn');
+const searchResultsList = document.getElementById('searchResultsList');
+const myFriendsList = document.getElementById('myFriendsList');
+const friendRequestsList = document.getElementById('friendRequestsList');
+
+if(userSearchBtn) {
+    userSearchBtn.addEventListener('click', async () => {
+        const queryText = userSearchInput.value.trim();
+        if(!queryText) return;
+        
+        searchResultsList.innerHTML = '<div style="color:#888;">Поиск...</div>';
+        
+        try {
+            let searchText = queryText.startsWith('@') ? queryText.substring(1) : queryText;
+            const q = query(collection(db, "users"), where("username", "==", searchText));
+            const snap = await getDocs(q);
+            
+            searchResultsList.innerHTML = '';
+            if(snap.empty) {
+                searchResultsList.innerHTML = '<div style="color:#888;">Не найдено</div>';
+                return;
+            }
+            
+            snap.forEach(d => {
+                if(d.id === auth.currentUser.uid) return; 
+                const u = d.data();
+                const card = document.createElement('div');
+                card.className = 'friend-card';
+                card.innerHTML = `
+                    <img src="${u.photoURL}">
+                    <div class="friend-name">${u.displayName}<br><span style="font-size:11px;color:#888;">@${u.username}</span></div>
+                    <button class="btn-add-friend" onclick="sendFriendRequest('${d.id}')">Добавить</button>
+                `;
+                searchResultsList.appendChild(card);
+            });
+        } catch(e) { console.error(e); }
+    });
+}
+
+window.sendFriendRequest = async (targetId) => {
+    try {
+        await addDoc(collection(db, "friend_requests"), {
+            from: auth.currentUser.uid,
+            to: targetId,
+            status: "pending",
+            timestamp: serverTimestamp()
+        });
+        showToast("Заявка отправлена!", "success");
+    } catch(e) { showToast("Ошибка: " + e.message, "error"); }
+};
+
+function loadFriendsList() {
+    const q = query(collection(db, "users", auth.currentUser.uid, "friends"));
+    onSnapshot(q, (snap) => {
+        myFriendsList.innerHTML = '';
+        if(snap.empty) { myFriendsList.innerHTML = '<div style="color:#888;">Нет друзей</div>'; return; }
+        
+        snap.forEach(async (friendDoc) => {
+            const friendId = friendDoc.id;
+            const uSnap = await getDoc(doc(db, "users", friendId));
+            if(!uSnap.exists()) return;
+            const u = uSnap.data();
+            
+            const card = document.createElement('div');
+            card.className = 'friend-card';
+            card.innerHTML = `
+                <img src="${u.photoURL}">
+                <div class="friend-name">${u.displayName}</div>
+                <button class="icon-btn" style="color:#007bff;" onclick="startDirectChat('${friendId}')"><span class="material-symbols-outlined">chat</span></button>
+            `;
+            myFriendsList.appendChild(card);
+        });
+    });
+}
+
+window.startDirectChat = async (friendId) => {
+    closeModal('friendsModal');
+    const chatId = [auth.currentUser.uid, friendId].sort().join('_');
+    
+    await setDoc(doc(db, "users", auth.currentUser.uid, "chats", chatId), {
+        type: 'direct',
+        partnerId: friendId,
+        lastMessageTime: serverTimestamp()
+    }, { merge: true });
+    
+    await setDoc(doc(db, "users", friendId, "chats", chatId), {
+        type: 'direct',
+        partnerId: auth.currentUser.uid,
+        lastMessageTime: serverTimestamp()
+    }, { merge: true });
+    
+    const uSnap = await getDoc(doc(db, "users", friendId));
+    if(uSnap.exists()) openChat(chatId, 'direct', uSnap.data());
+};
+
+function loadFriendRequests() {
+    const q = query(collection(db, "friend_requests"), where("to", "==", auth.currentUser.uid));
+    onSnapshot(q, (snap) => {
+        friendRequestsList.innerHTML = '';
+        const badge = document.getElementById('sidebarRequestsBadge');
+        const modalBadge = document.getElementById('modalRequestsBadge');
+        
+        if(snap.empty) {
+            friendRequestsList.innerHTML = '<div style="color:#888;">Нет заявок</div>';
+            if(badge) badge.style.display = 'none';
+            if(modalBadge) modalBadge.style.display = 'none';
+            return;
+        }
+        
+        if(badge) badge.style.display = 'block';
+        if(modalBadge) { modalBadge.style.display = 'flex'; modalBadge.textContent = snap.size; }
+
+        snap.forEach(async (reqDoc) => {
+            const data = reqDoc.data();
+            const uSnap = await getDoc(doc(db, "users", data.from));
+            if(!uSnap.exists()) return;
+            const u = uSnap.data();
+            
+            const card = document.createElement('div');
+            card.className = 'friend-card';
+            card.innerHTML = `
+                <img src="${u.photoURL}">
+                <div class="friend-name">${u.displayName}<br><span style="font-size:10px;">хочет дружить</span></div>
+                <button class="btn-add-friend" onclick="acceptRequest('${reqDoc.id}', '${data.from}')">V</button>
+                <button class="btn-remove-friend" style="margin-left:5px;" onclick="rejectRequest('${reqDoc.id}')">X</button>
+            `;
+            friendRequestsList.appendChild(card);
+        });
+    });
+}
+
+window.acceptRequest = async (reqId, fromId) => {
+    await setDoc(doc(db, "users", auth.currentUser.uid, "friends", fromId), { since: serverTimestamp() });
+    await setDoc(doc(db, "users", fromId, "friends", auth.currentUser.uid), { since: serverTimestamp() });
+    await deleteDoc(doc(db, "friend_requests", reqId));
+    showToast("Друг добавлен", "success");
+};
+
+window.rejectRequest = async (reqId) => {
+    await deleteDoc(doc(db, "friend_requests", reqId));
+};
+
+window.loadUsersForGroupCreation = async () => {
+    const list = document.getElementById('usersForGroupList');
+    list.innerHTML = 'Загрузка...';
+    const q = query(collection(db, "users", auth.currentUser.uid, "friends"));
+    const snap = await getDocs(q);
+    list.innerHTML = '';
+    
+    if(snap.empty) { list.innerHTML = 'Нет друзей для добавления'; return; }
+    
+    for(const d of snap.docs) {
+        const uSnap = await getDoc(doc(db, "users", d.id));
+        const u = uSnap.data();
+        const div = document.createElement('div');
+        div.className = 'grid-user-card';
+        div.onclick = () => {
+            div.classList.toggle('selected');
+            const cb = div.querySelector('input');
+            cb.checked = !cb.checked;
+        };
+        div.innerHTML = `
+            <img src="${u.photoURL}" class="grid-avatar">
+            <div class="grid-name">${u.displayName}</div>
+            <div class="grid-check"><span class="material-symbols-outlined" style="font-size:12px;">check</span></div>
+            <input type="checkbox" class="hidden-checkbox" value="${d.id}">
+        `;
+        list.appendChild(div);
+    }
+};
+
+document.getElementById('confirmCreateGroupBtn').addEventListener('click', async () => {
+    const name = document.getElementById('newGroupName').value.trim();
+    if(!name) return showToast("Введите название", "error");
+    
+    const checkboxes = document.querySelectorAll('#usersForGroupList input:checked');
+    const members = [auth.currentUser.uid];
+    checkboxes.forEach(cb => members.push(cb.value));
+    
+    try {
+        const groupRef = await addDoc(collection(db, "groups"), {
+            name: name,
+            owner: auth.currentUser.uid,
+            members: members,
+            createdAt: serverTimestamp()
+        });
+        
+        const promises = members.map(uid => 
+            setDoc(doc(db, "users", uid, "chats", groupRef.id), {
+                type: 'group',
+                groupId: groupRef.id,
+                lastMessageTime: serverTimestamp()
+            })
+        );
+        await Promise.all(promises);
+        
+        closeModal('createGroupModal');
+        showToast("Группа создана", "success");
+    } catch(e) { showToast("Ошибка: " + e.message, "error"); }
+});

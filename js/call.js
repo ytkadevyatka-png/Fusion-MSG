@@ -1,18 +1,13 @@
 import { db, auth } from "./firebase-config.js";
 import { collection, addDoc, onSnapshot, doc, updateDoc, serverTimestamp, query, where, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
-import { showToast, openModal, closeModal } from "./toast.js";
+import { showToast } from "./toast.js"; 
 
-// Серверы
 const servers = {
     iceServers: [
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        { urls: 'stun:stun.services.mozilla.com' } 
+        { urls: 'stun:stun2.l.google.com:19302' }
     ]
 };
-
 const rtcConfig = { offerToReceiveAudio: true, offerToReceiveVideo: false };
 
 let pc = null;
@@ -22,24 +17,28 @@ let unsubscribes = [];
 let callTimerInterval = null;
 let candidatesQueue = []; 
 
-// Wake Lock (Блокировка сна экрана)
-let wakeLock = null;
-
-// Время и ID чата
-let connectionStartTime = null;
 let activeChatId = null;
 let activeChatType = null;
+let connectionStartTime = null;
 
-// Audio
 let audioContext = null;
 let localAnalyser = null;
 let remoteAnalyser = null;
 let voiceLoop = null;
 
-// UI
+// UI Elements
+const callOverlay = document.getElementById('callOverlay');
 const remoteAudio = document.getElementById('remoteAudio');
 const callStatusText = document.getElementById('callStatusText');
 const callTimer = document.getElementById('callTimer');
+
+// Avatars
+const remoteAvatarContainer = document.getElementById('remoteAvatarContainer');
+const remoteAvatarImg = document.getElementById('remoteAvatarImg');
+const remoteName = document.getElementById('remoteName');
+const remoteVoiceIndicator = document.getElementById('remoteVoiceIndicator');
+const localAvatarImg = document.getElementById('localAvatarImg');
+const localVoiceIndicator = document.getElementById('localVoiceIndicator');
 
 // Buttons
 const hangupBtn = document.getElementById('hangupBtn');
@@ -47,22 +46,55 @@ const toggleMicBtn = document.getElementById('toggleMicBtn');
 const answerCallBtn = document.getElementById('answerCallBtn');
 const declineCallBtn = document.getElementById('declineCallBtn');
 const incomingCallControls = document.getElementById('incomingCallControls');
-const callControls = document.querySelector('.call-controls');
-
-// Avatars
-const remoteAvatarImg = document.getElementById('remoteAvatarImg');
-const remoteAvatarContainer = document.getElementById('remoteAvatarContainer');
-const remoteName = document.getElementById('remoteName');
-const remoteVoiceIndicator = document.getElementById('remoteVoiceIndicator');
-const remoteMuteIcon = document.getElementById('remoteMuteIcon');
-
-const localAvatarImg = document.getElementById('localAvatarImg');
-const localVoiceIndicator = document.getElementById('localVoiceIndicator');
-const localMuteIcon = document.getElementById('localMuteIcon');
+const callControlsRow = document.querySelector('.call-controls-row');
 
 const DEFAULT_AVATAR = "https://cdn-icons-png.flaticon.com/512/847/847969.png";
 
-// === 1. ИНИЦИАЛИЗАЦИЯ ===
+// === ИСПРАВЛЕНИЕ 5: DRAG & DROP ===
+function makeDraggable(element) {
+    let pos1 = 0, pos2 = 0, pos3 = 0, pos4 = 0;
+    const header = element.querySelector('.call-overlay-header');
+    
+    if (header) {
+        header.onmousedown = dragMouseDown;
+    }
+
+    function dragMouseDown(e) {
+        e = e || window.event;
+        e.preventDefault();
+        // Получаем позицию курсора
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        document.onmouseup = closeDragElement;
+        document.onmousemove = elementDrag;
+    }
+
+    function elementDrag(e) {
+        e = e || window.event;
+        e.preventDefault();
+        // Вычисляем новую позицию
+        pos1 = pos3 - e.clientX;
+        pos2 = pos4 - e.clientY;
+        pos3 = e.clientX;
+        pos4 = e.clientY;
+        // Устанавливаем положение
+        element.style.top = (element.offsetTop - pos2) + "px";
+        element.style.left = (element.offsetLeft - pos1) + "px";
+        // Сбрасываем right/bottom, чтобы работало позиционирование top/left
+        element.style.right = 'auto';
+        element.style.bottom = 'auto';
+    }
+
+    function closeDragElement() {
+        document.onmouseup = null;
+        document.onmousemove = null;
+    }
+}
+// Активируем перетаскивание при загрузке
+if(callOverlay) makeDraggable(callOverlay);
+
+
+// === INIT ===
 export function initCallSystem() {
     auth.onAuthStateChanged((user) => {
         if (!user) return;
@@ -86,21 +118,25 @@ export function initCallSystem() {
     });
 }
 
-// === 2. ИСХОДЯЩИЙ ЗВОНОК ===
+// === START CALL ===
 export async function startCall(targetUserId, targetUserName, targetUserPhoto, chatId, chatType) {
     if (!targetUserId) return;
     resetCallState();
     
-    activeChatId = chatId;
-    activeChatType = chatType;
+    activeChatId = chatId; activeChatType = chatType;
 
-    openModal('callModal');
+    if(callOverlay) {
+        callOverlay.classList.remove('hidden');
+        callOverlay.classList.remove('minimized'); // Всегда разворачиваем при новом звонке
+        // Сброс позиции в правый нижний угол при новом звонке (опционально)
+        callOverlay.style.top = ''; callOverlay.style.left = ''; callOverlay.style.right = '30px'; callOverlay.style.bottom = '30px';
+    }
+    
     updateUIState('dialing', { displayName: targetUserName, photoURL: targetUserPhoto });
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
         setupAudioAnalysis(localStream, 'local'); 
-        requestWakeLock(); // [MOBILE] Блокируем сон
     } catch (e) {
         handleMediaError(e);
         return;
@@ -140,8 +176,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
             processCandidateQueue();
         }
         
-        if (data.calleeMuted !== undefined) updateRemoteMuteUI(data.calleeMuted);
-        if (data.endedAt) endCallLocally("Звонок завершен");
+        if (data.endedAt) endCallLocally("Звонок завершен собеседником");
     });
     unsubscribes.push(callUnsub);
 
@@ -156,7 +191,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
     unsubscribes.push(candUnsub);
 }
 
-// === 3. ВХОДЯЩИЙ ЗВОНОК ===
+// === INCOMING CALL ===
 function showIncomingCall(id, data) {
     resetCallState();
     callDocId = id;
@@ -164,32 +199,33 @@ function showIncomingCall(id, data) {
     activeChatId = data.chatId || null;
     activeChatType = data.chatType || 'direct';
 
-    openModal('callModal');
+    if(callOverlay) {
+        callOverlay.classList.remove('hidden');
+        callOverlay.classList.remove('minimized');
+    }
+    
     updateUIState('incoming', { displayName: data.callerName, photoURL: data.callerPhoto });
 
-    answerCallBtn.onclick = () => acceptCall(id);
-    
-    declineCallBtn.onclick = async () => {
+    if(answerCallBtn) answerCallBtn.onclick = () => acceptCall(id);
+    if(declineCallBtn) declineCallBtn.onclick = async () => {
         await updateDoc(doc(db, "calls", id), { endedAt: serverTimestamp() });
-        closeModal('callModal');
+        endCallLocally("Вы отклонили звонок");
     };
 
     const callUnsub = onSnapshot(doc(db, "calls", id), (snap) => {
         const d = snap.data();
         if(d?.endedAt) endCallLocally("Звонок отменен");
-        if (d?.callerMuted !== undefined) updateRemoteMuteUI(d.callerMuted);
     });
     unsubscribes.push(callUnsub);
 }
 
-// === 4. ПРИНЯТИЕ ===
+// === ACCEPT CALL ===
 async function acceptCall(id) {
     updateUIState('connecting');
 
     try {
         localStream = await navigator.mediaDevices.getUserMedia({ video: false, audio: true });
         setupAudioAnalysis(localStream, 'local');
-        requestWakeLock(); // [MOBILE] Блокируем сон
     } catch (e) {
         handleMediaError(e);
         return;
@@ -205,16 +241,11 @@ async function acceptCall(id) {
         const callDocSnap = await getDoc(doc(db, "calls", id));
         if (!callDocSnap.exists()) {
             showToast("Звонок не найден", "error");
-            closeModal('callModal');
+            if(callOverlay) callOverlay.classList.add('hidden');
             return;
         }
         
         const freshData = callDocSnap.data();
-        if (!freshData.offer) {
-            showToast("Ошибка данных звонка", "error");
-            return;
-        }
-
         await pc.setRemoteDescription(new RTCSessionDescription(freshData.offer));
         
         const answerDescription = await pc.createAnswer(rtcConfig);
@@ -234,26 +265,22 @@ async function acceptCall(id) {
             });
         });
         unsubscribes.push(candUnsub);
-        
         processCandidateQueue();
 
     } catch (err) {
-        console.error("Accept Error:", err);
         showToast("Ошибка: " + err.message, "error");
     }
 }
 
-// === 5. WEBRTC CORE ===
-
+// === WEBRTC ===
 function createPC() {
     pc = new RTCPeerConnection(servers);
     localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
     
     pc.onconnectionstatechange = () => {
-        console.log("WebRTC State:", pc.connectionState);
         if (pc.connectionState === 'connected') {
             updateUIState('connected');
-            connectionStartTime = Date.now();
+            connectionStartTime = Date.now(); // Запоминаем начало разговора
         } else if (pc.connectionState === 'failed' || pc.connectionState === 'disconnected') {
             endCallLocally("Связь прервалась");
         }
@@ -261,8 +288,10 @@ function createPC() {
 
     pc.ontrack = (event) => {
         if (event.streams && event.streams[0]) {
-            remoteAudio.srcObject = event.streams[0];
-            remoteAudio.play().catch(e => console.log("Autoplay:", e));
+            if(remoteAudio) {
+                remoteAudio.srcObject = event.streams[0];
+                remoteAudio.play().catch(e => console.log("Autoplay:", e));
+            }
             setupAudioAnalysis(event.streams[0], 'remote');
         }
     };
@@ -302,16 +331,18 @@ function setupAudioAnalysis(stream, source) {
 
 function visualizeVoice() {
     const dataArray = new Uint8Array(128);
-    const threshold = 12; 
+    const threshold = 20; 
 
-    if (localAnalyser) {
+    // Локальный
+    if (localAnalyser && localVoiceIndicator) {
         localAnalyser.getByteFrequencyData(dataArray);
         const vol = dataArray.reduce((a, b) => a + b) / dataArray.length;
         if (vol > threshold) localVoiceIndicator.classList.add('speaking');
         else localVoiceIndicator.classList.remove('speaking');
     }
 
-    if (remoteAnalyser) {
+    // Удаленный
+    if (remoteAnalyser && remoteVoiceIndicator) {
         remoteAnalyser.getByteFrequencyData(dataArray);
         const vol = dataArray.reduce((a, b) => a + b) / dataArray.length;
         if (vol > threshold) remoteVoiceIndicator.classList.add('speaking');
@@ -321,84 +352,35 @@ function visualizeVoice() {
     voiceLoop = requestAnimationFrame(visualizeVoice);
 }
 
-// === WAKE LOCK (MOBILE) ===
-async function requestWakeLock() {
-    try {
-        if ('wakeLock' in navigator) {
-            wakeLock = await navigator.wakeLock.request('screen');
-            console.log('Wake Lock активен');
-        }
-    } catch (err) {
-        console.warn('Wake Lock error:', err);
-    }
-}
-
-function releaseWakeLock() {
-    if (wakeLock) {
-        wakeLock.release()
-            .then(() => { wakeLock = null; console.log('Wake Lock снят'); });
-    }
-}
-
-// === UI & ACTIONS ===
-toggleMicBtn.addEventListener('click', async () => {
-    if (!localStream) return;
-    const audioTrack = localStream.getAudioTracks()[0];
-    if (audioTrack) {
-        audioTrack.enabled = !audioTrack.enabled;
-        const isMuted = !audioTrack.enabled;
-        
-        toggleMicBtn.classList.toggle('active');
-        toggleMicBtn.innerHTML = isMuted ? '<span class="material-symbols-outlined">mic_off</span>' : '<span class="material-symbols-outlined">mic</span>';
-        
-        if (isMuted) localMuteIcon.classList.remove('hidden');
-        else localMuteIcon.classList.add('hidden');
-
-        if (callDocId) {
-            const snap = await getDoc(doc(db, "calls", callDocId));
-            if (snap.exists()) {
-                const data = snap.data();
-                if (data.callerId === auth.currentUser.uid) updateDoc(doc(db, "calls", callDocId), { callerMuted: isMuted });
-                else updateDoc(doc(db, "calls", callDocId), { calleeMuted: isMuted });
-            }
-        }
-    }
-});
-
-function updateRemoteMuteUI(isMuted) {
-    if (isMuted) remoteMuteIcon.classList.remove('hidden');
-    else remoteMuteIcon.classList.add('hidden');
-}
-
+// === UI UPDATES ===
 function updateUIState(state, userData = {}) {
-    remoteAvatarContainer.classList.remove('ringing');
+    if(remoteAvatarContainer) remoteAvatarContainer.classList.remove('ringing');
     
-    if (userData.photoURL) remoteAvatarImg.src = userData.photoURL;
-    else if (!remoteAvatarImg.src) remoteAvatarImg.src = DEFAULT_AVATAR;
-    
-    localAvatarImg.src = auth.currentUser.photoURL || DEFAULT_AVATAR;
+    if (userData.photoURL && remoteAvatarImg) remoteAvatarImg.src = userData.photoURL;
+    else if (remoteAvatarImg && !remoteAvatarImg.src) remoteAvatarImg.src = DEFAULT_AVATAR;
+
+    if(auth.currentUser && localAvatarImg) localAvatarImg.src = auth.currentUser.photoURL || DEFAULT_AVATAR;
+    if(remoteName) remoteName.textContent = userData.displayName || "Собеседник";
 
     if (state === 'dialing') {
-        callStatusText.textContent = "Вызов...";
-        remoteAvatarContainer.classList.add('ringing'); 
-        incomingCallControls.style.display = 'none';
-        callControls.style.display = 'flex';
-        remoteName.textContent = userData.displayName || "Пользователь";
+        if(callStatusText) callStatusText.textContent = "Вызов...";
+        if(remoteAvatarContainer) remoteAvatarContainer.classList.add('ringing'); 
+        if(incomingCallControls) incomingCallControls.style.display = 'none';
+        if(callControlsRow) callControlsRow.style.display = 'flex';
     } 
     else if (state === 'incoming') {
-        callStatusText.textContent = "Входящий звонок";
-        remoteAvatarContainer.classList.add('ringing'); 
-        incomingCallControls.style.display = 'flex';
-        callControls.style.display = 'none';
-        remoteName.textContent = userData.displayName || "Неизвестный";
+        if(callStatusText) callStatusText.textContent = "Входящий...";
+        if(remoteAvatarContainer) remoteAvatarContainer.classList.add('ringing'); 
+        if(incomingCallControls) incomingCallControls.style.display = 'flex';
+        if(callControlsRow) callControlsRow.style.display = 'none'; 
     }
     else if (state === 'connecting') {
-        callStatusText.textContent = "Соединение...";
-        incomingCallControls.style.display = 'none';
-        callControls.style.display = 'flex';
+        if(callStatusText) callStatusText.textContent = "Соединение...";
+        if(incomingCallControls) incomingCallControls.style.display = 'none';
+        if(callControlsRow) callControlsRow.style.display = 'flex';
     }
     else if (state === 'connected') {
-        callStatusText.textContent = "Разговор идет";
+        if(callStatusText) callStatusText.textContent = "В разговоре";
         startTimer();
     }
 }
@@ -410,46 +392,42 @@ function startTimer() {
         seconds++;
         const mins = Math.floor(seconds / 60).toString().padStart(2, '0');
         const secs = (seconds % 60).toString().padStart(2, '0');
-        callTimer.textContent = `${mins}:${secs}`;
+        if(callTimer) callTimer.textContent = `${mins}:${secs}`;
     }, 1000);
 }
 
 function handleMediaError(e) {
-    console.error(e);
     showToast("Ошибка микрофона. Проверьте HTTPS.", "error");
-    closeModal('callModal');
+    if(callOverlay) callOverlay.classList.add('hidden');
 }
 
 function resetCallState() {
-    callDocId = null;
-    candidatesQueue = [];
+    callDocId = null; candidatesQueue = [];
     connectionStartTime = null; 
+    // НЕ сбрасываем activeChatId здесь, он нужен для сообщения!
     
     if (localStream) localStream.getTracks().forEach(track => track.stop());
     if (pc) { pc.close(); pc = null; }
     
-    toggleMicBtn.classList.remove('active');
-    toggleMicBtn.innerHTML = '<span class="material-symbols-outlined">mic</span>';
-    localMuteIcon.classList.add('hidden');
-    remoteMuteIcon.classList.add('hidden');
-    localVoiceIndicator.classList.remove('speaking');
-    remoteVoiceIndicator.classList.remove('speaking');
+    if (toggleMicBtn) toggleMicBtn.style.background = '';
     
     if (voiceLoop) { cancelAnimationFrame(voiceLoop); voiceLoop = null; }
     if (audioContext) { audioContext.close(); audioContext = null; }
-    
-    releaseWakeLock(); // Снятие блокировки сна
 }
 
-hangupBtn.addEventListener('click', async () => {
-    await sendCallEndMessage();
-    if (callDocId) await updateDoc(doc(db, "calls", callDocId), { endedAt: serverTimestamp() });
-    endCallLocally();
-});
+if(hangupBtn) {
+    hangupBtn.addEventListener('click', async () => {
+        // Сначала отправляем сообщение, пока есть данные о чате
+        await sendCallEndMessage();
+        if (callDocId) await updateDoc(doc(db, "calls", callDocId), { endedAt: serverTimestamp() });
+        endCallLocally();
+    });
+}
 
+// === ИСПРАВЛЕНИЕ 7: Отправка сообщения ===
 async function sendCallEndMessage() {
     if (!activeChatId || !auth.currentUser) return;
-
+    
     let durationText = "00:00";
     if (connectionStartTime) {
         const diff = Date.now() - connectionStartTime;
@@ -459,15 +437,15 @@ async function sendCallEndMessage() {
         durationText = `${m}:${s}`;
     }
 
+    // Форматируем время окончания
     const now = new Date();
     const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 
     const collectionName = activeChatType === 'direct' ? 'chats' : 'groups';
-    const text = `Звонок завершен в ${timeString}. Длительность: ${durationText}`;
-
+    
     try {
         await addDoc(collection(db, collectionName, activeChatId, "messages"), {
-            text: text,
+            text: `Звонок был завершен в ${timeString}. Длительность звонка: ${durationText}`,
             type: 'system',
             timestamp: serverTimestamp()
         });
@@ -478,6 +456,8 @@ async function sendCallEndMessage() {
 
 function endCallLocally(msg) {
     if (msg) showToast(msg, "info");
+    
+    // Останавливаем потоки и таймеры
     resetCallState();
     
     if (unsubscribes.length > 1) {
@@ -486,7 +466,16 @@ function endCallLocally(msg) {
     }
     
     if (callTimerInterval) clearInterval(callTimerInterval);
-    remoteAudio.srcObject = null;
-    remoteAvatarContainer.classList.remove('ringing');
-    closeModal('callModal');
+    if(remoteAudio) remoteAudio.srcObject = null;
+    if(remoteAvatarContainer) remoteAvatarContainer.classList.remove('ringing');
+    
+    // === ИСПРАВЛЕНИЕ 6: Скрываем (но логически он остается доступен для след. вызова)
+    if(callOverlay) {
+        callOverlay.classList.add('hidden');
+        callOverlay.classList.remove('minimized');
+    }
+    
+    // Сбрасываем ID чата только после всего
+    activeChatId = null;
+    activeChatType = null;
 }
