@@ -20,7 +20,7 @@ let candidatesQueue = [];
 let activeChatId = null;
 let activeChatType = null;
 let connectionStartTime = null;
-let isCaller = false; // Добавлено для логики мьюта
+let isCaller = false; 
 
 let audioContext = null;
 let localAnalyser = null;
@@ -144,7 +144,7 @@ export function initCallSystem() {
 export async function startCall(targetUserId, targetUserName, targetUserPhoto, chatId, chatType) {
     if (!targetUserId) return;
     resetCallState();
-    isCaller = true; // Мы звоним
+    isCaller = true; 
     
     activeChatId = chatId; activeChatType = chatType;
 
@@ -172,7 +172,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
         callerPhoto: auth.currentUser.photoURL,
         calleeId: targetUserId,
         createdAt: serverTimestamp(),
-        callerMuted: false, // Изначально включен
+        callerMuted: false, 
         calleeMuted: false,
         chatId: chatId,
         chatType: chatType
@@ -222,7 +222,7 @@ export async function startCall(targetUserId, targetUserName, targetUserPhoto, c
 function showIncomingCall(id, data) {
     resetCallState();
     callDocId = id;
-    isCaller = false; // Нам звонят
+    isCaller = false; 
     
     activeChatId = data.chatId || null;
     activeChatType = data.chatType || 'direct';
@@ -281,7 +281,7 @@ async function acceptCall(id) {
 
         await updateDoc(doc(db, "calls", id), { 
             answer: { type: answerDescription.type, sdp: answerDescription.sdp },
-            calleeMuted: false // Изначально включен
+            calleeMuted: false 
         });
 
         const candUnsub = onSnapshot(collection(db, "calls", id, "offerCandidates"), (snap) => {
@@ -294,7 +294,7 @@ async function acceptCall(id) {
         });
         unsubscribes.push(candUnsub);
 
-        // Слушаем изменения звонка (мьют собеседника)
+        // Слушаем изменения звонка (мьют собеседника - мы callee, значит смотрим callerMuted)
         const muteUnsub = onSnapshot(doc(db, "calls", id), (snap) => {
             const d = snap.data();
             if (d && d.callerMuted !== undefined) {

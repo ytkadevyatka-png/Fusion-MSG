@@ -35,7 +35,7 @@ html, body {
     animation: fadeIn 0.6s ease-out; 
 }
 
-/* === ТЕМЫ (ОСТАЮТСЯ БЕЗ ИЗМЕНЕНИЙ) === */
+/* === ТЕМЫ === */
 [data-theme="pure-white"] { --bg-gradient: #ffffff; --sidebar-bg: rgba(245,245,245,0.8); --main-bg: rgba(255,255,255,0.6); --modal-bg: rgba(255,255,255,0.95); --input-bg: rgba(238,238,238,0.8); --glass-border: 1px solid #ccc; --text-color: #000; --text-sub: #333; --primary-color: #000; --on-primary-text: #fff; --my-msg-bg: #000; --friend-msg-bg: rgba(255,255,255,0.9); --toast-bg: rgba(255,255,255,0.95); --toast-text: #000; }
 [data-theme="classic-gray"] { --bg-gradient: #d0d0d0; --sidebar-bg: rgba(224,224,224,0.8); --main-bg: rgba(240,240,240,0.7); --modal-bg: rgba(230,230,230,0.95); --input-bg: rgba(255,255,255,0.8); --glass-border: 1px solid #999; --text-color: #000; --text-sub: #222; --primary-color: #444; --my-msg-bg: #444; --friend-msg-bg: #fff; --toast-bg: #e0e0e0; --toast-text: #000; }
 [data-theme="standard-dark"] { --bg-gradient: #202020; --sidebar-bg: rgba(30,30,30,0.8); --main-bg: rgba(40,40,40,0.7); --modal-bg: rgba(45,45,45,0.95); --input-bg: rgba(60,60,60,0.8); --glass-border: 1px solid rgba(255,255,255,0.1); --text-color: #fff; --text-sub: #ccc; --primary-color: #5865f2; --on-primary-text: #fff; --my-msg-bg: #5865f2; --friend-msg-bg: rgba(60,60,60,0.9); --friend-msg-text: #fff; --toast-bg: rgba(50,50,50,0.95); --toast-text: #fff; --btn-secondary-bg: rgba(255,255,255,0.1); --panel-sidebar-bg: rgba(255,255,255,0.05); }
@@ -150,14 +150,14 @@ html, body {
 
 .chat-room { display: flex; flex-direction: column; height: 100%; width: 100%; justify-content: flex-start; }
 
-/* ИСПРАВЛЕНИЕ #1: Выравнивание кнопки назад и аватара */
+/* ИСПРАВЛЕНИЕ: ЖЕСТКОЕ ВЫРАВНИВАНИЕ ХЕДЕРА */
 .chat-header { 
     height: 70px; 
     min-height: 70px; 
     flex: 0 0 70px;
     padding: 0 20px; 
     display: flex; 
-    align-items: center; 
+    align-items: center; /* Центрирует все по вертикали */
     justify-content: space-between; 
     border-bottom: var(--glass-border); 
     background: rgba(0,0,0,0.02); 
@@ -165,10 +165,11 @@ html, body {
     z-index: 50;
 }
 .header-left {
-    display: flex;
-    align-items: center;
+    display: flex; /* КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ: Выстраивает кнопку и инфо в ряд */
+    align-items: center; /* Центрирует их по вертикали */
     min-width: 0;
     flex: 1;
+    height: 100%;
 }
 .header-user-info { display: flex; align-items: center; gap: 10px; flex: 1; margin-left: 10px; overflow: hidden; min-width: 0; }
 .header-avatar img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 1px solid var(--glass-border); }
@@ -210,9 +211,9 @@ html, body {
 .avatar-ring-wrapper { position: relative; border-radius: 50%; }
 .call-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; border: 2px solid #333; z-index: 2; position: relative; }
 
-/* ИСПРАВЛЕНИЕ #3: Индикатор выключенного микрофона */
+/* Индикатор выключенного микрофона (УВИДИТ СОБЕСЕДНИК) */
 .avatar-ring-wrapper.muted::after {
-    content: '\e02b'; /* Код иконки mic_off */
+    content: 'mic_off'; /* Код иконки material symbols */
     font-family: 'Material Symbols Outlined';
     position: absolute;
     bottom: -5px;
@@ -326,7 +327,7 @@ html, body {
 .btn-add-friend { background: var(--primary-color); color: var(--on-primary-text); }
 .btn-remove-friend { background: rgba(255, 77, 77, 0.1); color: #ff4444; }
 
-/* === МОБИЛЬНАЯ ВЕРСИЯ (ИСПРАВЛЕННАЯ ПОЛНОСТЬЮ) === */
+/* === МОБИЛЬНАЯ ВЕРСИЯ (ИСПРАВЛЕННАЯ) === */
 @media (max-width: 768px) {
     .app-layout { position: relative; }
     
@@ -406,7 +407,7 @@ html, body {
     
     #backToChatsBtn { display: block !important; }
 
-    /* ИСПРАВЛЕНИЕ #2: Вкладки ВНИЗУ (для компактности), контент СВЕРХУ */
+    /* ИСПРАВЛЕНИЕ: Вкладки ВНИЗУ, кнопки не сплющены */
     .split-modal-layout { 
         width: 95%; 
         height: 90dvh; 
@@ -418,7 +419,7 @@ html, body {
         height: auto !important;
         min-height: 50px;
         flex-direction: row !important; /* Вкладки в ряд */
-        padding: 0 10px !important;
+        padding: 0 !important; /* УБРАЛ ЛИШНИЕ ОТСТУПЫ */
         align-items: center;
         justify-content: space-around; /* Равномерно */
         border-right: none;
@@ -428,9 +429,11 @@ html, body {
     }
     .modal-nav-item {
         justify-content: center !important; 
-        padding: 10px !important;
+        padding: 10px 0 !important; /* Только вертикальный паддинг */
         flex: 1; /* Растягиваем равномерно */
-        border-radius: 8px !important;
+        border-radius: 0 !important;
+        height: 100%;
+        margin: 0 !important;
     }
     /* Скрываем текст, оставляем только иконку */
     .modal-nav-item span:not(.material-symbols-outlined) {
